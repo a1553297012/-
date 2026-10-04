@@ -8,35 +8,23 @@ on:
 
 jobs:
   build:
-    runs-on: macos-14
+    runs-on: macos-latest
 
     steps:
-      - name: Checkout project
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install dependencies
-        run: |
-          brew update
-          brew install make ldid-procursus
-
-      - name: Install Theos
-        run: |
-          export THEOS="$HOME/theos"
-          rm -rf "$THEOS"
-
-          git clone --recursive \
-            https://github.com/theos/theos.git \
-            "$THEOS"
-
-          git clone \
-            https://github.com/theos/sdks.git \
-            "$THEOS/sdks"
-
-          echo "THEOS=$THEOS" >> "$GITHUB_ENV"
+      - name: Setup Theos
+        uses: waruhachi/theos-action@v2.6.3
+        with:
+          theos-src: 'theos/theos'
+          theos-branch: 'master'
+          sdks-src: 'theos/sdks'
+          sdks-branch: 'master'
 
       - name: Build dylib
         run: |
-          make clean || true
+          make clean
           make FINALPACKAGE=1
 
       - name: Find dylib
