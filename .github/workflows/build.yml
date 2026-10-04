@@ -17,13 +17,12 @@ jobs:
 
       - name: Install Theos
         run: |
+          rm -rf "$HOME/theos"
           git clone --recursive https://github.com/theos/theos.git "$HOME/theos"
-          git clone --recursive https://github.com/theos/sdks.git "$HOME/theos/sdks"
 
       - name: Build dylib
-        env:
-          THEOS: ${{ github.workspace }}/../theos
         run: |
+          export THEOS="$HOME/theos"
           make clean
           make
 
