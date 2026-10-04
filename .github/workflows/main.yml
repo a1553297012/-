@@ -1,0 +1,49 @@
+name: Build dylib
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout project
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          brew update
+          brew install make ldid-procursus
+
+      - name: Install Theos
+        run: |
+          export THEOS="$HOME/theos"
+          rm -rf "$THEOS"
+
+          git clone --recursive \
+            https://github.com/theos/theos.git \
+            "$THEOS"
+
+          git clone \
+            https://github.com/theos/sdks.git \
+            "$THEOS/sdks"
+
+          echo "THEOS=$THEOS" >> "$GITHUB_ENV"
+
+      - name: Build dylib
+        run: |
+          make clean || true
+          make FINALPACKAGE=1
+
+      - name: Find dylib
+        run: |
+          mkdir -p output
+          find .theos -type f -name "*.dylib" -exec cp {} output/ \;
+          ls -lh output
+
+      - name: Upload dylib
+        uses: actions/upload-artifact@v4
+        with:
+          name: VoiceRebuildInjectTest-dylib
+          path: output/*.dylib
