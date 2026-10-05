@@ -1,449 +1,117 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
-#import <objc/runtime.h>
 
-#pragma mark - Global
+#pragma mark - Debug
 
-typedef void (*HBVoiceOriginalFunc)(id, SEL, id);
+static void HBShowTestAlert(void)
+{
+    dispatch_async(dispatch_get_main_queue(), ^{
+        @autoreleasepool {
 
-static HBVoiceOriginalFunc HBOriginalGetNewVoiceServerList = NULL;
-static BOOL HBHookInstalled = NO;
+            UIWindow *window = nil;
 
-#pragma mark - File Logger
+            if (@available(iOS 13.0, *)) {
 
-static NSString *HBLogPath(void) {
+                for (UIScene *scene in
+                     [UIApplication sharedApplication].connectedScenes) {
 
-    return @"/var/mobile/Media/VoiceRebuild.log";
-}
+                    if (scene.activationState ==
+                        UISceneActivationStateForegroundActive) {
 
-static void HBWriteLog(NSString *text) {
+                        if ([scene isKindOfClass:[UIWindowScene class]]) {
 
-    if (!text) {
-        return;
-    }
+                            UIWindowScene *windowScene =
+                                (UIWindowScene *)scene;
 
-    @autoreleasepool {
+                            for (UIWindow *candidate
+                                 in windowScene.windows) {
 
-        NSString *time =
-            [[NSDate date] description];
+                                if (candidate.isKeyWindow) {
+                                    window = candidate;
+                                    break;
+                                }
+                            }
 
-        NSString *line =
-            [NSString stringWithFormat:
-                @"[%@] %@\n",
-                time,
-                text];
-
-        /*
-         * 同时写系统日志
-         */
-        NSLog(
-            @"[VoiceRebuild] %@",
-            text
-        );
-
-        /*
-         * 写入文件
-         */
-        NSString *path =
-            HBLogPath();
-
-        NSFileManager *fm =
-            [NSFileManager defaultManager];
-
-        if (![fm fileExistsAtPath:path]) {
-
-            [@"" writeToFile:
-                path
-                atomically:YES
-                encoding:NSUTF8StringEncoding
-                error:nil];
-        }
-
-        NSFileHandle *handle =
-            [NSFileHandle fileHandleForWritingAtPath:path];
-
-        if (!handle) {
-
-            NSLog(
-                @"[VoiceRebuild] "
-                @"无法打开日志文件: %@",
-                path
-            );
-
-            return;
-        }
-
-        @try {
-
-            [handle seekToEndOfFile];
-
-            NSData *data =
-                [line dataUsingEncoding:
-                    NSUTF8StringEncoding];
-
-            [handle writeData:data];
-
-            [handle closeFile];
-
-        } @catch (NSException *exception) {
-
-            NSLog(
-                @"[VoiceRebuild] "
-                @"写日志异常: %@",
-                exception
-            );
-
-            @try {
-                [handle closeFile];
-            } @catch (...) {
-            }
-        }
-    }
-}
-
-#pragma mark - Object Description
-
-static void HBLogObject(
-    id obj,
-    NSString *name
-) {
-
-    if (!obj) {
-
-        HBWriteLog(
-            [NSString stringWithFormat:
-                @"%@ = nil",
-                name]
-        );
-
-        return;
-    }
-
-    HBWriteLog(
-        [NSString stringWithFormat:
-            @"%@ class = %@",
-            name,
-            NSStringFromClass([obj class])]
-    );
-
-    HBWriteLog(
-        [NSString stringWithFormat:
-            @"%@ description = %@",
-            name,
-            obj]
-    );
-
-    /*
-     * 如果参数是 UIAlertController，
-     * 把里面的信息也记录下来。
-     */
-    if ([obj isKindOfClass:
-            [UIAlertController class]]) {
-
-        UIAlertController *alert =
-            (UIAlertController *)obj;
-
-        HBWriteLog(
-            [NSString stringWithFormat:
-                @"%@ title = %@",
-                name,
-                alert.title]
-        );
-
-        HBWriteLog(
-            [NSString stringWithFormat:
-                @"%@ message = %@",
-                name,
-                alert.message]
-        );
-
-        HBWriteLog(
-            [NSString stringWithFormat:
-                @"%@ actions count = %lu",
-                name,
-                (unsigned long)alert.actions.count]
-        );
-
-        for (UIAlertAction *action
-             in alert.actions) {
-
-            HBWriteLog(
-                [NSString stringWithFormat:
-                    @"%@ action = %@",
-                    name,
-                    action.title]
-            );
-        }
-    }
-}
-
-#pragma mark - Hook Function
-
-static void HBHookedGetNewVoiceServerList(
-    id self,
-    SEL _cmd,
-    id arg
-) {
-
-    HBWriteLog(
-        @"========================================"
-    );
-
-    HBWriteLog(
-        @"getNewVoiceServerList: CALLED"
-    );
-
-    HBWriteLog(
-        [NSString stringWithFormat:
-            @"self class = %@",
-            NSStringFromClass([self class])]
-    );
-
-    HBLogObject(
-        arg,
-        @"ARGUMENT BEFORE"
-    );
-
-    /*
-     * 调用 HB 原来的方法
-     */
-    if (HBOriginalGetNewVoiceServerList) {
-
-        HBOriginalGetNewVoiceServerList(
-            self,
-            _cmd,
-            arg
-        );
-
-    } else {
-
-        HBWriteLog(
-            @"ERROR: original IMP is NULL"
-        );
-    }
-
-    /*
-     * 原方法执行完成
-     */
-    HBLogObject(
-        arg,
-        @"ARGUMENT AFTER"
-    );
-
-    HBWriteLog(
-        @"getNewVoiceServerList: FINISHED"
-    );
-
-    HBWriteLog(
-        @"========================================"
-    );
-}
-
-#pragma mark - Install Hook
-
-static void HookVoiceController(void) {
-
-    if (HBHookInstalled) {
-
-        HBWriteLog(
-            @"Hook already installed"
-        );
-
-        return;
-    }
-
-    Class cls =
-        NSClassFromString(
-            @"VoiceSelectController"
-        );
-
-    if (!cls) {
-
-        HBWriteLog(
-            @"ERROR: VoiceSelectController not found"
-        );
-
-        return;
-    }
-
-    HBWriteLog(
-        [NSString stringWithFormat:
-            @"VoiceSelectController FOUND: %@",
-            cls]
-    );
-
-    SEL selector =
-        NSSelectorFromString(
-            @"getNewVoiceServerList:"
-        );
-
-    Method method =
-        class_getInstanceMethod(
-            cls,
-            selector
-        );
-
-    if (!method) {
-
-        HBWriteLog(
-            @"ERROR: getNewVoiceServerList: not found"
-        );
-
-        return;
-    }
-
-    HBWriteLog(
-        @"getNewVoiceServerList: FOUND"
-    );
-
-    IMP oldIMP =
-        method_getImplementation(
-            method
-        );
-
-    if (!oldIMP) {
-
-        HBWriteLog(
-            @"ERROR: old IMP is NULL"
-        );
-
-        return;
-    }
-
-    HBOriginalGetNewVoiceServerList =
-        (HBVoiceOriginalFunc)oldIMP;
-
-    method_setImplementation(
-        method,
-        (IMP)HBHookedGetNewVoiceServerList
-    );
-
-    HBHookInstalled = YES;
-
-    HBWriteLog(
-        @"========================================"
-    );
-
-    HBWriteLog(
-        @"HOOK INSTALLED SUCCESSFULLY"
-    );
-
-    HBWriteLog(
-        [NSString stringWithFormat:
-            @"class = %@",
-            cls]
-    );
-
-    HBWriteLog(
-        [NSString stringWithFormat:
-            @"selector = %@",
-            NSStringFromSelector(selector)]
-    );
-
-    HBWriteLog(
-        [NSString stringWithFormat:
-            @"log file = %@",
-            HBLogPath()]
-    );
-
-    HBWriteLog(
-        @"========================================"
-    );
-}
-
-#pragma mark - Delayed Start
-
-static void StartVoiceHook(void) {
-
-    HBWriteLog(
-        @"VoiceRebuild loaded"
-    );
-
-    HBWriteLog(
-        @"Waiting for HB initialization..."
-    );
-
-    dispatch_after(
-        dispatch_time(
-            DISPATCH_TIME_NOW,
-            5 * NSEC_PER_SEC
-        ),
-        dispatch_get_main_queue(),
-        ^{
-
-            HBWriteLog(
-                @"Checking VoiceSelectController..."
-            );
-
-            Class cls =
-                NSClassFromString(
-                    @"VoiceSelectController"
-                );
-
-            if (cls) {
-
-                HBWriteLog(
-                    @"VoiceSelectController is ready"
-                );
-
-                HookVoiceController();
-
-            } else {
-
-                HBWriteLog(
-                    @"VoiceSelectController "
-                    @"not ready yet"
-                );
-
-                dispatch_after(
-                    dispatch_time(
-                        DISPATCH_TIME_NOW,
-                        5 * NSEC_PER_SEC
-                    ),
-                    dispatch_get_main_queue(),
-                    ^{
-
-                        HookVoiceController();
+                            if (window) {
+                                break;
+                            }
+                        }
                     }
-                );
+                }
             }
+
+            if (!window) {
+                window =
+                    [UIApplication sharedApplication].keyWindow;
+            }
+
+            UIViewController *root =
+                window.rootViewController;
+
+            if (!root) {
+                NSLog(@"[VoiceRebuild] ERROR: rootViewController nil");
+                return;
+            }
+
+            while (root.presentedViewController) {
+                root = root.presentedViewController;
+            }
+
+            UIAlertController *alert =
+                [UIAlertController
+                    alertControllerWithTitle:@"HB语音测试"
+                    message:@"VoiceRebuildInjectTest.dylib 已成功加载！"
+                    preferredStyle:UIAlertControllerStyleAlert];
+
+            [alert addAction:
+                [UIAlertAction
+                    actionWithTitle:@"确定"
+                    style:UIAlertActionStyleDefault
+                    handler:nil]];
+
+            [root presentViewController:alert
+                               animated:YES
+                             completion:^{
+                NSLog(
+                    @"[VoiceRebuild] TEST ALERT PRESENTED"
+                );
+            }];
         }
-    );
+    });
 }
 
 #pragma mark - Constructor
 
 __attribute__((constructor))
-static void VoiceRebuildInjectTest_Loaded(void) {
-
+static void VoiceRebuildInjectTest_Loaded(void)
+{
     @autoreleasepool {
 
-        HBWriteLog(
+        NSLog(
             @"========================================"
         );
 
-        HBWriteLog(
-            @"VoiceRebuild loaded successfully"
+        NSLog(
+            @"[VoiceRebuild] DLL LOADED SUCCESSFULLY"
         );
 
-        HBWriteLog(
-            @"Debug window: DISABLED"
+        NSLog(
+            @"[VoiceRebuild] TEST VERSION"
         );
 
-        HBWriteLog(
-            @"UIAlertController: DISABLED"
-        );
-
-        HBWriteLog(
-            [NSString stringWithFormat:
-                @"Log path: %@",
-                HBLogPath()]
-        );
-
-        HBWriteLog(
+        NSLog(
             @"========================================"
         );
 
-        StartVoiceHook();
+        dispatch_after(
+            dispatch_time(
+                DISPATCH_TIME_NOW,
+                3 * NSEC_PER_SEC
+            ),
+            dispatch_get_main_queue(),
+            ^{
+                HBShowTestAlert();
+            }
+        );
     }
 }
