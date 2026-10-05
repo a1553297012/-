@@ -1,105 +1,66 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
-#import <QuartzCore/QuartzCore.h>
 #import <objc/runtime.h>
 
-#pragma mark - 调试窗口
+#pragma mark - HB Voice Hook
 
-static UIWindow *HBDebugWindow = nil;
+static BOOL HBVoiceHookInstalled = NO;
 
-static void HBShow(NSString *text) {
+#pragma mark - 打印 UIAlertController 内容
 
-    dispatch_async(dispatch_get_main_queue(), ^{
+static void HBLogAlertController(id obj, NSString *prefix) {
 
-        if (!HBDebugWindow) {
+    if (!obj) {
+        NSLog(@"[VoiceRebuild] %@ = nil", prefix);
+        return;
+    }
 
-            HBDebugWindow =
-                [[UIWindow alloc] initWithFrame:
-                 [UIScreen mainScreen].bounds];
+    NSLog(@"[VoiceRebuild] %@ class = %@",
+          prefix,
+          NSStringFromClass([obj class]));
 
-            HBDebugWindow.windowLevel =
-                UIWindowLevelAlert + 100;
+    NSLog(@"[VoiceRebuild] %@ description = %@",
+          prefix,
+          obj);
 
-            HBDebugWindow.backgroundColor =
-                [UIColor clearColor];
+    if ([obj isKindOfClass:[UIAlertController class]]) {
 
-            // 关键：不拦截微信的触摸
-            HBDebugWindow.userInteractionEnabled = NO;
+        UIAlertController *alert =
+            (UIAlertController *)obj;
 
-            UIViewController *vc =
-                [UIViewController new];
+        NSLog(@"[VoiceRebuild] %@ title = %@",
+              prefix,
+              alert.title);
 
-            vc.view.backgroundColor =
-                [UIColor clearColor];
+        NSLog(@"[VoiceRebuild] %@ message = %@",
+              prefix,
+              alert.message);
 
-            HBDebugWindow.rootViewController = vc;
+        NSLog(@"[VoiceRebuild] %@ actions count = %lu",
+              prefix,
+              (unsigned long)alert.actions.count);
 
-            HBDebugWindow.hidden = NO;
+        for (UIAlertAction *action in alert.actions) {
+
+            NSLog(@"[VoiceRebuild] %@ action = %@",
+                  prefix,
+                  action.title);
         }
-
-        UIViewController *vc =
-            HBDebugWindow.rootViewController;
-
-        UILabel *label =
-            [vc.view viewWithTag:9527];
-
-        if (!label) {
-
-            label =
-                [[UILabel alloc]
-                 initWithFrame:
-                 CGRectMake(
-                     15,
-                     80,
-                     [UIScreen mainScreen].bounds.size.width - 30,
-                     320
-                 )];
-
-            label.tag = 9527;
-
-            label.numberOfLines = 0;
-
-            label.font =
-                [UIFont systemFontOfSize:14];
-
-            label.textColor =
-                [UIColor whiteColor];
-
-            label.backgroundColor =
-                [[UIColor blackColor]
-                 colorWithAlphaComponent:0.90];
-
-            label.layer.cornerRadius = 12;
-
-            label.layer.masksToBounds = YES;
-
-            label.textAlignment =
-                NSTextAlignmentLeft;
-
-            [vc.view addSubview:label];
-        }
-
-        label.text = text;
-
-        HBDebugWindow.hidden = NO;
-
-        // 8 秒后自动隐藏
-        dispatch_after(
-            dispatch_time(
-                DISPATCH_TIME_NOW,
-                8 * NSEC_PER_SEC
-            ),
-            dispatch_get_main_queue(),
-            ^{
-                HBDebugWindow.hidden = YES;
-            }
-        );
-    });
+    }
 }
 
-#pragma mark - Hook HB VoiceSelectController
+#pragma mark - Hook VoiceSelectController
 
 static void HookVoiceController(void) {
+
+    if (HBVoiceHookInstalled) {
+
+        NSLog(
+            @"[VoiceRebuild] Hook already installed"
+        );
+
+        return;
+    }
 
     Class cls =
         NSClassFromString(@"VoiceSelectController");
@@ -107,16 +68,16 @@ static void HookVoiceController(void) {
     if (!cls) {
 
         NSLog(
-            @"[VoiceRebuild] VoiceSelectController not found"
-        );
-
-        HBShow(
-            @"HB语音拦截\n\n"
-             "❌ 找不到 VoiceSelectController"
+            @"[VoiceRebuild] ❌ VoiceSelectController not found"
         );
 
         return;
     }
+
+    NSLog(
+        @"[VoiceRebuild] ✅ VoiceSelectController found: %@",
+        cls
+    );
 
     SEL sel =
         NSSelectorFromString(
@@ -129,16 +90,15 @@ static void HookVoiceController(void) {
     if (!method) {
 
         NSLog(
-            @"[VoiceRebuild] getNewVoiceServerList: not found"
-        );
-
-        HBShow(
-            @"HB语音拦截\n\n"
-             "❌ 找不到 getNewVoiceServerList:"
+            @"[VoiceRebuild] ❌ getNewVoiceServerList: not found"
         );
 
         return;
     }
+
+    NSLog(
+        @"[VoiceRebuild] ✅ getNewVoiceServerList: found"
+    );
 
     IMP oldIMP =
         method_getImplementation(method);
@@ -157,51 +117,54 @@ static void HookVoiceController(void) {
             ^void(id self, id arg) {
 
                 NSLog(
-                    @"[VoiceRebuild] ==================="
+                    @"[VoiceRebuild] "
+                    @"========================================"
                 );
 
                 NSLog(
-                    @"[VoiceRebuild] HB VOICE SERVER"
+                    @"[VoiceRebuild] "
+                    @"getNewVoiceServerList: CALLED"
                 );
 
                 NSLog(
-                    @"[VoiceRebuild] argument = %@",
-                    arg
+                    @"[VoiceRebuild] self = %@",
+                    self
                 );
 
                 NSLog(
-                    @"[VoiceRebuild] ==================="
+                    @"[VoiceRebuild] self class = %@",
+                    NSStringFromClass([self class])
                 );
 
-                NSString *info =
-                    [NSString stringWithFormat:
-                     @"HB语音拦截\n\n"
-                     @"方法：\n"
-                     @"getNewVoiceServerList:\n\n"
-                     @"参数：\n"
-                     @"%@",
-                     arg];
+                HBLogAlertController(
+                    arg,
+                    @"BEFORE"
+                );
 
                 /*
-                 * 等 HB 原来的提示框消失后
-                 * 再显示我们的信息。
+                 * 执行 HB 原来的方法
                  */
-                dispatch_after(
-                    dispatch_time(
-                        DISPATCH_TIME_NOW,
-                        2 * NSEC_PER_SEC
-                    ),
-                    dispatch_get_main_queue(),
-                    ^{
-                        HBShow(info);
-                    }
-                );
-
-                // 执行 HB 原来的方法
                 original(
                     self,
                     sel,
                     arg
+                );
+
+                /*
+                 * 原方法执行完成以后
+                 * 再次读取参数。
+                 *
+                 * 如果 HB 是通过传入的 UIAlertController
+                 * 修改提示内容，这里就可以看到结果。
+                 */
+                HBLogAlertController(
+                    arg,
+                    @"AFTER"
+                );
+
+                NSLog(
+                    @"[VoiceRebuild] "
+                    @"========================================"
                 );
             }
         );
@@ -211,15 +174,78 @@ static void HookVoiceController(void) {
         newIMP
     );
 
+    HBVoiceHookInstalled = YES;
+
     NSLog(
-        @"[VoiceRebuild] Hook installed!"
+        @"[VoiceRebuild] "
+        @"✅ Hook installed successfully!"
+    );
+}
+
+#pragma mark - 等待 HB 初始化
+
+static void StartVoiceHookSearch(void) {
+
+    NSLog(
+        @"[VoiceRebuild] "
+        @"开始寻找 VoiceSelectController..."
     );
 
-    HBShow(
-        @"HB语音拦截\n\n"
-         "✅ Hook 成功\n\n"
-         "现在点击“获取音色”..."
-    );
+    /*
+     * HB 可能不是马上完成初始化。
+     *
+     * 每 2 秒检查一次。
+     * 最多检查 30 次。
+     */
+
+    __block int count = 0;
+
+    dispatch_queue_t queue =
+        dispatch_get_main_queue();
+
+    void (^checkBlock)(void) =
+        ^{
+            count++;
+
+            NSLog(
+                @"[VoiceRebuild] "
+                @"检查 VoiceSelectController (%d/30)",
+                count
+            );
+
+            Class cls =
+                NSClassFromString(
+                    @"VoiceSelectController"
+                );
+
+            if (cls) {
+
+                HookVoiceController();
+
+                return;
+            }
+
+            if (count >= 30) {
+
+                NSLog(
+                    @"[VoiceRebuild] "
+                    @"❌ 等待超时，仍未找到 VoiceSelectController"
+                );
+
+                return;
+            }
+
+            dispatch_after(
+                dispatch_time(
+                    DISPATCH_TIME_NOW,
+                    2 * NSEC_PER_SEC
+                ),
+                queue,
+                checkBlock
+            );
+        };
+
+    checkBlock();
 }
 
 #pragma mark - 插件加载
@@ -230,20 +256,41 @@ static void VoiceRebuildInjectTest_Loaded(void) {
     @autoreleasepool {
 
         NSLog(
-            @"[VoiceRebuild] loaded successfully"
+            @"[VoiceRebuild] "
+            @"========================================"
+        );
+
+        NSLog(
+            @"[VoiceRebuild] "
+            @"VoiceRebuild loaded successfully"
+        );
+
+        NSLog(
+            @"[VoiceRebuild] "
+            @"不再创建任何调试窗口"
+        );
+
+        NSLog(
+            @"[VoiceRebuild] "
+            @"不再显示 UIAlertController"
+        );
+
+        NSLog(
+            @"[VoiceRebuild] "
+            @"========================================"
         );
 
         /*
-         * 等微信和 HB 初始化完成
+         * 等待微信 / HB 初始化
          */
         dispatch_after(
             dispatch_time(
                 DISPATCH_TIME_NOW,
-                5 * NSEC_PER_SEC
+                3 * NSEC_PER_SEC
             ),
             dispatch_get_main_queue(),
             ^{
-                HookVoiceController();
+                StartVoiceHookSearch();
             }
         );
     }
