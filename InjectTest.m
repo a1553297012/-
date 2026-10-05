@@ -1,9 +1,9 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
-#import <objc/message.h>
 
-#pragma mark - 日志
+static IMP OriginalGetReVoice = NULL;
+static IMP OriginalGetNewVoiceServerList = NULL;
 
 static void VoicePluginLog(NSString *format, ...) {
     va_list args;
@@ -32,47 +32,87 @@ static void VoicePluginLog(NSString *format, ...) {
                     error:nil];
     } else {
         [file seekToEndOfFile];
-        [file writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
+        [file writeData:
+            [line dataUsingEncoding:NSUTF8StringEncoding]];
         [file closeFile];
     }
 
     NSLog(@"[VoicePlugin] %@", message);
 }
 
-#pragma mark - 原始 IMP
+static void VoicePluginLogAlertController(UIViewController *controller) {
 
-static IMP OriginalGetReVoice = NULL;
-static IMP OriginalGetNewVoiceServerList = NULL;
+    if (![controller isKindOfClass:[UIAlertController class]]) {
+        VoicePluginLog(@"argument is not UIAlertController");
+        return;
+    }
 
-#pragma mark - Hook: GetReVoice
+    UIAlertController *alert =
+        (UIAlertController *)controller;
+
+    VoicePluginLog(@"UIAlertController title = %@",
+                   alert.title);
+
+    VoicePluginLog(@"UIAlertController message = %@",
+                   alert.message);
+
+    NSArray *actions = alert.actions;
+
+    VoicePluginLog(@"UIAlertController actions = %lu",
+                   (unsigned long)actions.count);
+
+    for (NSUInteger i = 0;
+         i < actions.count;
+         i++) {
+
+        UIAlertAction *action = actions[i];
+
+        VoicePluginLog(
+            @"ACTION[%lu] title=%@ style=%ld",
+            (unsigned long)i,
+            action.title,
+            (long)action.style
+        );
+    }
+}
 
 static void VoicePlugin_GetReVoice(id self, SEL _cmd) {
 
-    VoicePluginLog(@"================================");
-    VoicePluginLog(@"GetReVoice CALLED");
-    VoicePluginLog(@"self = %@", self);
-    VoicePluginLog(@"class = %@", NSStringFromClass([self class]));
+    @autoreleasepool {
 
-    NSArray *stack = [NSThread callStackSymbols];
+        VoicePluginLog(@"================================");
+        VoicePluginLog(@"GetReVoice CALLED");
 
-    for (NSUInteger i = 0;
-         i < MIN(stack.count, 12);
-         i++) {
+        VoicePluginLog(@"self = %@", self);
+        VoicePluginLog(@"class = %@",
+                       NSStringFromClass([self class]));
 
-        VoicePluginLog(@"STACK[%lu] %@",
-                       (unsigned long)i,
-                       stack[i]);
+        NSArray *stack =
+            [NSThread callStackSymbols];
+
+        for (NSUInteger i = 0;
+             i < MIN(stack.count, 15);
+             i++) {
+
+            VoicePluginLog(
+                @"STACK[%lu] %@",
+                (unsigned long)i,
+                stack[i]
+            );
+        }
+
+        if (OriginalGetReVoice) {
+
+            ((void (*)(id, SEL))
+             OriginalGetReVoice)(
+                 self,
+                 _cmd
+             );
+        }
+
+        VoicePluginLog(@"GetReVoice RETURN");
     }
-
-    if (OriginalGetReVoice) {
-        ((void (*)(id, SEL))
-         OriginalGetReVoice)(self, _cmd);
-    }
-
-    VoicePluginLog(@"GetReVoice RETURN");
 }
-
-#pragma mark - Hook: getNewVoiceServerList:
 
 static void VoicePlugin_GetNewVoiceServerList(
     id self,
@@ -80,54 +120,83 @@ static void VoicePlugin_GetNewVoiceServerList(
     id arg
 ) {
 
-    VoicePluginLog(@"================================");
-    VoicePluginLog(@"getNewVoiceServerList: CALLED");
+    @autoreleasepool {
 
-    if (arg) {
-        VoicePluginLog(@"arg class = %@",
-                       NSStringFromClass([arg class]));
+        VoicePluginLog(@"================================");
+        VoicePluginLog(
+            @"getNewVoiceServerList: CALLED"
+        );
 
-        VoicePluginLog(@"arg = %@",
-                       arg);
-    } else {
-        VoicePluginLog(@"arg = nil");
-    }
+        if (arg) {
 
-    NSArray *stack = [NSThread callStackSymbols];
+            VoicePluginLog(
+                @"arg class = %@",
+                NSStringFromClass([arg class])
+            );
 
-    for (NSUInteger i = 0;
-         i < MIN(stack.count, 12);
-         i++) {
+            VoicePluginLog(
+                @"arg description = %@",
+                arg
+            );
 
-        VoicePluginLog(@"STACK[%lu] %@",
-                       (unsigned long)i,
-                       stack[i]);
-    }
+            VoicePluginLogAlertController(
+                arg
+            );
 
-    if (OriginalGetNewVoiceServerList) {
-        ((void (*)(id, SEL, id))
-         OriginalGetNewVoiceServerList)(
-            self,
-            _cmd,
-            arg
+        } else {
+
+            VoicePluginLog(@"arg = nil");
+        }
+
+        NSArray *stack =
+            [NSThread callStackSymbols];
+
+        for (NSUInteger i = 0;
+             i < MIN(stack.count, 15);
+             i++) {
+
+            VoicePluginLog(
+                @"STACK[%lu] %@",
+                (unsigned long)i,
+                stack[i]
+            );
+        }
+
+        if (OriginalGetNewVoiceServerList) {
+
+            ((void (*)(id, SEL, id))
+             OriginalGetNewVoiceServerList)(
+                 self,
+                 _cmd,
+                 arg
+             );
+        }
+
+        VoicePluginLog(
+            @"getNewVoiceServerList: RETURN"
         );
     }
-
-    VoicePluginLog(@"getNewVoiceServerList: RETURN");
 }
-
-#pragma mark - 安装 Hook
 
 static BOOL VoicePluginInstallHooks(void) {
 
-    Class cls = NSClassFromString(@"VoiceSelectController");
+    Class cls =
+        NSClassFromString(
+            @"VoiceSelectController"
+        );
 
     if (!cls) {
-        VoicePluginLog(@"VoiceSelectController NOT FOUND");
+
+        VoicePluginLog(
+            @"VoiceSelectController NOT FOUND"
+        );
+
         return NO;
     }
 
-    VoicePluginLog(@"VoiceSelectController FOUND");
+    VoicePluginLog(
+        @"VoiceSelectController FOUND"
+    );
 
     Method reVoiceMethod =
         class_getInstanceMethod(
@@ -138,7 +207,9 @@ static BOOL VoicePluginInstallHooks(void) {
     if (reVoiceMethod) {
 
         OriginalGetReVoice =
-            method_getImplementation(reVoiceMethod);
+            method_getImplementation(
+                reVoiceMethod
+            );
 
         method_setImplementation(
             reVoiceMethod,
@@ -149,8 +220,12 @@ static BOOL VoicePluginInstallHooks(void) {
             @"Hooked GetReVoice, original IMP = %p",
             OriginalGetReVoice
         );
+
     } else {
-        VoicePluginLog(@"GetReVoice NOT FOUND");
+
+        VoicePluginLog(
+            @"GetReVoice NOT FOUND"
+        );
     }
 
     Method serverMethod =
@@ -162,7 +237,9 @@ static BOOL VoicePluginInstallHooks(void) {
     if (serverMethod) {
 
         OriginalGetNewVoiceServerList =
-            method_getImplementation(serverMethod);
+            method_getImplementation(
+                serverMethod
+            );
 
         method_setImplementation(
             serverMethod,
@@ -173,7 +250,9 @@ static BOOL VoicePluginInstallHooks(void) {
             @"Hooked getNewVoiceServerList:, original IMP = %p",
             OriginalGetNewVoiceServerList
         );
+
     } else {
+
         VoicePluginLog(
             @"getNewVoiceServerList: NOT FOUND"
         );
@@ -182,18 +261,23 @@ static BOOL VoicePluginInstallHooks(void) {
     return YES;
 }
 
-#pragma mark - 启动
-
 __attribute__((constructor))
 static void VoicePluginInit(void) {
 
     @autoreleasepool {
 
         VoicePluginLog(@"================================");
-        VoicePluginLog(@"VoicePlugin START");
-        VoicePluginLog(@"PID = %d", getpid());
-        VoicePluginLog(@"Process = %@",
-                       [[NSProcessInfo processInfo] processName]);
+        VoicePluginLog(@"VoicePlugin V2 START");
+
+        VoicePluginLog(
+            @"PID = %d",
+            getpid()
+        );
+
+        VoicePluginLog(
+            @"Process = %@",
+            [[NSProcessInfo processInfo] processName]
+        );
 
         dispatch_after(
             dispatch_time(
