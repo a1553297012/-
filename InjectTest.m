@@ -167,7 +167,7 @@ static void HBWriteLog(NSString *format, ...)
     /*
      * 整体下移，避免顶部内容被导航栏遮挡
      */
-    CGFloat top = 45.0;
+    CGFloat top = 90.0;
 
     /*
      * ==============================
