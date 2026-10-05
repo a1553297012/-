@@ -7,7 +7,7 @@ TWEAK_NAME = VoiceRebuildInjectTest
 
 VoiceRebuildInjectTest_FILES = InjectTest.m
 VoiceRebuildInjectTest_CFLAGS = -fobjc-arc
-VoiceRebuildInjectTest_FRAMEWORKS = Foundation UIKit
+VoiceRebuildInjectTest_FRAMEWORKS = Foundation UIKit AVFoundation
 
 INSTALL_TARGET_PROCESSES = WeChat
 
