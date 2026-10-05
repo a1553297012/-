@@ -2,10 +2,10 @@
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 
-static IMP OriginalGetReVoice = NULL;
-static IMP OriginalGetNewVoiceServerList = NULL;
+#pragma mark - 日志
 
-static void VoicePluginLog(NSString *format, ...) {
+static void HBWriteLog(NSString *format, ...)
+{
     va_list args;
     va_start(args, format);
 
@@ -15,269 +15,153 @@ static void VoicePluginLog(NSString *format, ...) {
     va_end(args);
 
     NSString *path =
-        [NSHomeDirectory() stringByAppendingPathComponent:
-         @"Documents/VoicePlugin.log"];
+        [NSHomeDirectory()
+         stringByAppendingPathComponent:
+         @"Documents/HBInjectTest.log"];
 
     NSString *line =
-        [NSString stringWithFormat:@"[%@] %@\n",
-         [NSDate date], message];
+        [NSString stringWithFormat:
+         @"[%@] %@\n",
+         [NSDate date],
+         message];
 
     NSFileHandle *file =
         [NSFileHandle fileHandleForWritingAtPath:path];
 
-    if (!file) {
+    if (file)
+    {
+        [file seekToEndOfFile];
+
+        [file writeData:
+         [line dataUsingEncoding:
+          NSUTF8StringEncoding]];
+
+        [file closeFile];
+    }
+    else
+    {
         [line writeToFile:path
                atomically:YES
                  encoding:NSUTF8StringEncoding
                     error:nil];
-    } else {
-        [file seekToEndOfFile];
-        [file writeData:
-            [line dataUsingEncoding:NSUTF8StringEncoding]];
-        [file closeFile];
     }
 
-    NSLog(@"[VoicePlugin] %@", message);
+    NSLog(@"[HBInjectTest] %@", message);
 }
 
-static void VoicePluginLogAlertController(UIViewController *controller) {
+#pragma mark - 扫描设置相关 Class
 
-    if (![controller isKindOfClass:[UIAlertController class]]) {
-        VoicePluginLog(@"argument is not UIAlertController");
+static void HBScanSettingClasses(void)
+{
+    HBWriteLog(@"========================================");
+    HBWriteLog(@"START SETTING CLASS SCAN");
+
+    int count = objc_getClassList(NULL, 0);
+
+    if (count <= 0)
+    {
+        HBWriteLog(@"objc_getClassList returned 0");
         return;
     }
 
-    UIAlertController *alert =
-        (UIAlertController *)controller;
+    Class *classes =
+        (__unsafe_unretained Class *)
+        malloc(sizeof(Class) * count);
 
-    VoicePluginLog(@"UIAlertController title = %@",
-                   alert.title);
+    int actualCount =
+        objc_getClassList(classes, count);
 
-    VoicePluginLog(@"UIAlertController message = %@",
-                   alert.message);
+    HBWriteLog(@"Total classes = %d", actualCount);
 
-    NSArray *actions = alert.actions;
+    for (int i = 0; i < actualCount; i++)
+    {
+        Class cls = classes[i];
 
-    VoicePluginLog(@"UIAlertController actions = %lu",
-                   (unsigned long)actions.count);
+        if (!cls)
+            continue;
 
-    for (NSUInteger i = 0;
-         i < actions.count;
-         i++) {
+        NSString *name =
+            NSStringFromClass(cls);
 
-        UIAlertAction *action = actions[i];
+        if (!name)
+            continue;
 
-        VoicePluginLog(
-            @"ACTION[%lu] title=%@ style=%ld",
-            (unsigned long)i,
-            action.title,
-            (long)action.style
+        BOOL matched =
+            [name rangeOfString:@"Setting"
+                         options:NSCaseInsensitiveSearch].location
+                != NSNotFound
+            ||
+            [name rangeOfString:@"More"
+                         options:NSCaseInsensitiveSearch].location
+                != NSNotFound
+            ||
+            [name rangeOfString:@"Config"
+                         options:NSCaseInsensitiveSearch].location
+                != NSNotFound
+            ||
+            [name rangeOfString:@"Profile"
+                         options:NSCaseInsensitiveSearch].location
+                != NSNotFound
+            ||
+            [name rangeOfString:@"Account"
+                         options:NSCaseInsensitiveSearch].location
+                != NSNotFound;
+
+        if (!matched)
+            continue;
+
+        Class superClass =
+            class_getSuperclass(cls);
+
+        NSString *superName =
+            superClass
+            ? NSStringFromClass(superClass)
+            : @"<none>";
+
+        HBWriteLog(
+            @"FOUND CLASS: %@ | SUPER: %@",
+            name,
+            superName
         );
     }
+
+    free(classes);
+
+    HBWriteLog(@"END SETTING CLASS SCAN");
+    HBWriteLog(@"========================================");
 }
 
-static void VoicePlugin_GetReVoice(id self, SEL _cmd) {
-
-    @autoreleasepool {
-
-        VoicePluginLog(@"================================");
-        VoicePluginLog(@"GetReVoice CALLED");
-
-        VoicePluginLog(@"self = %@", self);
-        VoicePluginLog(@"class = %@",
-                       NSStringFromClass([self class]));
-
-        NSArray *stack =
-            [NSThread callStackSymbols];
-
-        for (NSUInteger i = 0;
-             i < MIN(stack.count, 15);
-             i++) {
-
-            VoicePluginLog(
-                @"STACK[%lu] %@",
-                (unsigned long)i,
-                stack[i]
-            );
-        }
-
-        if (OriginalGetReVoice) {
-
-            ((void (*)(id, SEL))
-             OriginalGetReVoice)(
-                 self,
-                 _cmd
-             );
-        }
-
-        VoicePluginLog(@"GetReVoice RETURN");
-    }
-}
-
-static void VoicePlugin_GetNewVoiceServerList(
-    id self,
-    SEL _cmd,
-    id arg
-) {
-
-    @autoreleasepool {
-
-        VoicePluginLog(@"================================");
-        VoicePluginLog(
-            @"getNewVoiceServerList: CALLED"
-        );
-
-        if (arg) {
-
-            VoicePluginLog(
-                @"arg class = %@",
-                NSStringFromClass([arg class])
-            );
-
-            VoicePluginLog(
-                @"arg description = %@",
-                arg
-            );
-
-            VoicePluginLogAlertController(
-                arg
-            );
-
-        } else {
-
-            VoicePluginLog(@"arg = nil");
-        }
-
-        NSArray *stack =
-            [NSThread callStackSymbols];
-
-        for (NSUInteger i = 0;
-             i < MIN(stack.count, 15);
-             i++) {
-
-            VoicePluginLog(
-                @"STACK[%lu] %@",
-                (unsigned long)i,
-                stack[i]
-            );
-        }
-
-        if (OriginalGetNewVoiceServerList) {
-
-            ((void (*)(id, SEL, id))
-             OriginalGetNewVoiceServerList)(
-                 self,
-                 _cmd,
-                 arg
-             );
-        }
-
-        VoicePluginLog(
-            @"getNewVoiceServerList: RETURN"
-        );
-    }
-}
-
-static BOOL VoicePluginInstallHooks(void) {
-
-    Class cls =
-        NSClassFromString(
-            @"VoiceSelectController"
-        );
-
-    if (!cls) {
-
-        VoicePluginLog(
-            @"VoiceSelectController NOT FOUND"
-        );
-
-        return NO;
-    }
-
-    VoicePluginLog(
-        @"VoiceSelectController FOUND"
-    );
-
-    Method reVoiceMethod =
-        class_getInstanceMethod(
-            cls,
-            @selector(GetReVoice)
-        );
-
-    if (reVoiceMethod) {
-
-        OriginalGetReVoice =
-            method_getImplementation(
-                reVoiceMethod
-            );
-
-        method_setImplementation(
-            reVoiceMethod,
-            (IMP)VoicePlugin_GetReVoice
-        );
-
-        VoicePluginLog(
-            @"Hooked GetReVoice, original IMP = %p",
-            OriginalGetReVoice
-        );
-
-    } else {
-
-        VoicePluginLog(
-            @"GetReVoice NOT FOUND"
-        );
-    }
-
-    Method serverMethod =
-        class_getInstanceMethod(
-            cls,
-            @selector(getNewVoiceServerList:)
-        );
-
-    if (serverMethod) {
-
-        OriginalGetNewVoiceServerList =
-            method_getImplementation(
-                serverMethod
-            );
-
-        method_setImplementation(
-            serverMethod,
-            (IMP)VoicePlugin_GetNewVoiceServerList
-        );
-
-        VoicePluginLog(
-            @"Hooked getNewVoiceServerList:, original IMP = %p",
-            OriginalGetNewVoiceServerList
-        );
-
-    } else {
-
-        VoicePluginLog(
-            @"getNewVoiceServerList: NOT FOUND"
-        );
-    }
-
-    return YES;
-}
+#pragma mark - Constructor
 
 __attribute__((constructor))
-static void VoicePluginInit(void) {
+static void HBInjectTestInit(void)
+{
+    @autoreleasepool
+    {
+        HBWriteLog(@"========================================");
+        HBWriteLog(@"INJECT TEST CONSTRUCTOR START");
 
-    @autoreleasepool {
+        HBWriteLog(@"InjectTest.m 已经被加载");
 
-        VoicePluginLog(@"================================");
-        VoicePluginLog(@"VoicePlugin V2 START");
-
-        VoicePluginLog(
-            @"PID = %d",
+        HBWriteLog(
+            @"Process ID = %d",
             getpid()
         );
 
-        VoicePluginLog(
-            @"Process = %@",
+        HBWriteLog(
+            @"Process name = %@",
             [[NSProcessInfo processInfo] processName]
         );
+
+        HBWriteLog(@"========================================");
+
+        /*
+         * 延迟几秒。
+         *
+         * 目的：
+         * 等微信主程序完成初始化后，
+         * 再扫描 Objective-C Class。
+         */
 
         dispatch_after(
             dispatch_time(
@@ -286,7 +170,7 @@ static void VoicePluginInit(void) {
             ),
             dispatch_get_main_queue(),
             ^{
-                VoicePluginInstallHooks();
+                HBScanSettingClasses();
             }
         );
     }
