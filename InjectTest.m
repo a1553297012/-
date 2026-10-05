@@ -89,6 +89,12 @@ static void HBWriteLog(NSString *format, ...)
 {
     [super viewDidLoad];
 
+    /*
+     * 不让内容延伸到导航栏下面
+     */
+    self.edgesForExtendedLayout = UIRectEdgeNone;
+    self.extendedLayoutIncludesOpaqueBars = NO;
+
     self.title = @"文本转语音";
 
     if (@available(iOS 13.0, *))
@@ -167,7 +173,7 @@ static void HBWriteLog(NSString *format, ...)
     /*
      * 整体下移，避免顶部内容被导航栏遮挡
      */
-    CGFloat top = 90.0;
+    CGFloat top = 20.0;
 
     /*
      * ==============================
