@@ -1,125 +1,205 @@
 #import <Foundation/Foundation.h>
-#import <UIKit/UIKit.h>
-#import <mach-o/dyld.h>
-#import <mach-o/getsect.h>
-#import <mach-o/loader.h>
-#import <mach/mach.h>
+#import <objc/runtime.h>
+#import <stdarg.h>
 
-static void ScanOpenVoiceImages(void) {
-    NSMutableString *result = [NSMutableString string];
+static void VTLog(NSString *format, ...) {
+    va_list args;
+    va_start(args, format);
+    NSString *msg = [[NSString alloc] initWithFormat:format arguments:args];
+    va_end(args);
 
-    uint32_t count = _dyld_image_count();
-
-    [result appendFormat:@"扫描 Mach-O 镜像：%u 个\n\n", count];
-
-    int found = 0;
-
-    for (uint32_t i = 0; i < count; i++) {
-        const char *name = _dyld_get_image_name(i);
-        if (!name) continue;
-
-        const struct mach_header_64 *header =
-            (const struct mach_header_64 *)_dyld_get_image_header(i);
-
-        if (!header || header->magic != MH_MAGIC_64)
-            continue;
-
-        const struct section_64 *section =
-            getsectbynamefromheader_64(header, "__DATA", "__ovmodel");
-
-        if (!section) {
-            section =
-                getsectbynamefromheader_64(header, "__TEXT", "__ovmodel");
-        }
-
-        if (!section) {
-            section =
-                getsectbynamefromheader_64(header, "__DATA_CONST", "__ovmodel");
-        }
-
-        if (section) {
-            found++;
-
-            [result appendFormat:
-                @"🔥 找到 __ovmodel\n"
-                 @"镜像：%s\n"
-                 @"地址：0x%llx\n"
-                 @"大小：%llu bytes\n\n",
-                name,
-                section->addr,
-                section->size];
-        }
-    }
-
-    if (found == 0) {
-        [result appendString:@"❌ 当前没有发现 __ovmodel\n\n"];
-    } else {
-        [result appendFormat:@"\n✅ 共发现 %d 个 __ovmodel\n", found];
-    }
-
-    // 检查预期模型缓存目录
-    NSString *cache =
-        [NSHomeDirectory() stringByAppendingPathComponent:
-         @"Library/Caches/SenHangVoiceModels"];
-
-    [result appendFormat:
-        @"\n模型缓存目录：\n%@\n",
-        cache];
-
-    NSFileManager *fm = [NSFileManager defaultManager];
-
-    BOOL isDir = NO;
-    BOOL exists = [fm fileExistsAtPath:cache isDirectory:&isDir];
-
-    if (!exists) {
-        [result appendString:@"❌ 缓存目录不存在\n"];
-    } else {
-        [result appendFormat:@"✅ 缓存目录存在（目录=%@）\n",
-         isDir ? @"YES" : @"NO"];
-
-        NSArray *items = [fm contentsOfDirectoryAtPath:cache error:nil];
-
-        [result appendFormat:@"项目数量：%lu\n",
-         (unsigned long)items.count];
-
-        for (NSString *item in items) {
-            [result appendFormat:@"  %@\n", item];
-        }
-    }
-
-    dispatch_async(dispatch_get_main_queue(), ^{
-        UIAlertController *alert =
-            [UIAlertController alertControllerWithTitle:@"OpenVoice 模型扫描"
-                                                message:result
-                                         preferredStyle:UIAlertControllerStyleAlert];
-
-        [alert addAction:
-            [UIAlertAction actionWithTitle:@"复制结果"
-                                     style:UIAlertActionStyleDefault
-                                   handler:^(UIAlertAction *action) {
-            UIPasteboard.generalPasteboard.string = result;
-        }]];
-
-        [alert addAction:
-            [UIAlertAction actionWithTitle:@"关闭"
-                                     style:UIAlertActionStyleCancel
-                                   handler:nil]];
-
-        UIViewController *vc = UIApplication.sharedApplication.keyWindow.rootViewController;
-
-        while (vc.presentedViewController)
-            vc = vc.presentedViewController;
-
-        [vc presentViewController:alert animated:YES completion:nil];
-    });
+    NSLog(@"[VoiceTrace] %@", msg);
 }
 
-__attribute__((constructor))
-static void VoiceScanInit(void) {
-    dispatch_after(
-        dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5 * NSEC_PER_SEC)),
-        dispatch_get_main_queue(), ^{
-            ScanOpenVoiceImages();
+static void VTSwizzle(Class cls, SEL original, SEL replacement) {
+    Method a = class_getInstanceMethod(cls, original);
+    Method b = class_getInstanceMethod(cls, replacement);
+
+    if (!a || !b) {
+        VTLog(@"HOOK FAILED: %@ %@", NSStringFromClass(cls),
+              NSStringFromSelector(original));
+        return;
+    }
+
+    method_exchangeImplementations(a, b);
+
+    VTLog(@"HOOK OK: %@ %@", NSStringFromClass(cls),
+          NSStringFromSelector(original));
+}
+
+#pragma mark - NSURLSession
+
+@interface NSURLSession (VoiceTrace)
+
+- (NSURLSessionDataTask *)vt_dataTaskWithRequest:(NSURLRequest *)request
+                               completionHandler:(void (^)(NSData *,
+                                                           NSURLResponse *,
+                                                           NSError *))completionHandler;
+
+- (NSURLSessionDownloadTask *)vt_downloadTaskWithRequest:(NSURLRequest *)request
+                                       completionHandler:(void (^)(NSURL *,
+                                                                   NSURLResponse *,
+                                                                   NSError *))completionHandler;
+
+@end
+
+@implementation NSURLSession (VoiceTrace)
+
+- (NSURLSessionDataTask *)vt_dataTaskWithRequest:(NSURLRequest *)request
+                               completionHandler:(void (^)(NSData *,
+                                                           NSURLResponse *,
+                                                           NSError *))completionHandler {
+
+    VTLog(@"DATA URL = %@", request.URL.absoluteString ?: @"<nil>");
+    VTLog(@"METHOD = %@", request.HTTPMethod ?: @"GET");
+
+    if (request.HTTPBody.length > 0) {
+        VTLog(@"BODY LENGTH = %lu",
+              (unsigned long)request.HTTPBody.length);
+    }
+
+    if (request.allHTTPHeaderFields.count > 0) {
+        VTLog(@"HEADER NAMES = %@",
+              request.allHTTPHeaderFields.allKeys);
+    }
+
+    void (^wrapped)(NSData *, NSURLResponse *, NSError *) =
+    ^(NSData *data, NSURLResponse *response, NSError *error) {
+
+        if ([response isKindOfClass:[NSHTTPURLResponse class]]) {
+
+            NSHTTPURLResponse *http =
+                (NSHTTPURLResponse *)response;
+
+            VTLog(@"RESPONSE = %ld",
+                  (long)http.statusCode);
+
+            VTLog(@"RESPONSE URL = %@",
+                  response.URL.absoluteString ?: @"<nil>");
+
+            VTLog(@"RESPONSE BYTES = %lu",
+                  (unsigned long)data.length);
         }
-    );
+
+        if (error) {
+            VTLog(@"ERROR = %@", error.localizedDescription);
+        }
+
+        if (completionHandler) {
+            completionHandler(data, response, error);
+        }
+    };
+
+    return [self vt_dataTaskWithRequest:request
+                      completionHandler:wrapped];
+}
+
+- (NSURLSessionDownloadTask *)vt_downloadTaskWithRequest:(NSURLRequest *)request
+                                       completionHandler:(void (^)(NSURL *,
+                                                                   NSURLResponse *,
+                                                                   NSError *))completionHandler {
+
+    VTLog(@"DOWNLOAD URL = %@",
+          request.URL.absoluteString ?: @"<nil>");
+
+    VTLog(@"METHOD = %@",
+          request.HTTPMethod ?: @"GET");
+
+    if (request.HTTPBody.length > 0) {
+        VTLog(@"BODY LENGTH = %lu",
+              (unsigned long)request.HTTPBody.length);
+    }
+
+    void (^wrapped)(NSURL *, NSURLResponse *, NSError *) =
+    ^(NSURL *location, NSURLResponse *response, NSError *error) {
+
+        if ([response isKindOfClass:[NSHTTPURLResponse class]]) {
+
+            NSHTTPURLResponse *http =
+                (NSHTTPURLResponse *)response;
+
+            VTLog(@"DOWNLOAD RESPONSE = %ld",
+                  (long)http.statusCode);
+
+            VTLog(@"DOWNLOAD URL = %@",
+                  response.URL.absoluteString ?: @"<nil>");
+        }
+
+        VTLog(@"TEMP FILE = %@",
+              location.path ?: @"<nil>");
+
+        if (error) {
+            VTLog(@"DOWNLOAD ERROR = %@",
+                  error.localizedDescription);
+        }
+
+        if (completionHandler) {
+            completionHandler(location, response, error);
+        }
+    };
+
+    return [self vt_downloadTaskWithRequest:request
+                           completionHandler:wrapped];
+}
+
+@end
+
+#pragma mark - File tracing
+
+@interface NSFileManager (VoiceTrace)
+
+- (BOOL)vt_fileExistsAtPath:(NSString *)path;
+
+@end
+
+@implementation NSFileManager (VoiceTrace)
+
+- (BOOL)vt_fileExistsAtPath:(NSString *)path {
+
+    BOOL result = [self vt_fileExistsAtPath:path];
+
+    NSString *p = path.lowercaseString;
+
+    if ([p containsString:@"voice"] ||
+        [p containsString:@"model"] ||
+        [p containsString:@"silk"] ||
+        [p containsString:@"pcm"] ||
+        [p containsString:@"senhang"] ||
+        [p containsString:@"ovmodel"]) {
+
+        VTLog(@"FILE CHECK = %@ => %@",
+              path,
+              result ? @"YES" : @"NO");
+    }
+
+    return result;
+}
+
+@end
+
+#pragma mark - Constructor
+
+__attribute__((constructor))
+static void VoiceTraceLoaded(void) {
+
+    @autoreleasepool {
+
+        VTLog(@"==============================");
+        VTLog(@"VoiceTrace loaded");
+        VTLog(@"==============================");
+
+        VTSwizzle([NSURLSession class],
+                  @selector(dataTaskWithRequest:completionHandler:),
+                  @selector(vt_dataTaskWithRequest:completionHandler:));
+
+        VTSwizzle([NSURLSession class],
+                  @selector(downloadTaskWithRequest:completionHandler:),
+                  @selector(vt_downloadTaskWithRequest:completionHandler:));
+
+        VTSwizzle([NSFileManager class],
+                  @selector(fileExistsAtPath:),
+                  @selector(vt_fileExistsAtPath:));
+
+        VTLog(@"VoiceTrace READY");
+    }
 }
