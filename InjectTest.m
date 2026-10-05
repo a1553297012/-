@@ -1,232 +1,209 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
+#import <objc/message.h>
 
-static NSString *HBLogPath(void) {
-    NSArray *paths =
-        NSSearchPathForDirectoriesInDomains(
-            NSDocumentDirectory,
-            NSUserDomainMask,
-            YES
-        );
+#pragma mark - 日志
 
-    return [paths.firstObject
-            stringByAppendingPathComponent:@"HBCallTrace.log"];
-}
-
-static void HBLog(NSString *format, ...) {
+static void VoicePluginLog(NSString *format, ...) {
     va_list args;
     va_start(args, format);
 
-    NSString *msg =
-        [[NSString alloc] initWithFormat:format
-                            arguments:args];
+    NSString *message =
+        [[NSString alloc] initWithFormat:format arguments:args];
 
     va_end(args);
 
+    NSString *path =
+        [NSHomeDirectory() stringByAppendingPathComponent:
+         @"Documents/VoicePlugin.log"];
+
     NSString *line =
         [NSString stringWithFormat:@"[%@] %@\n",
-         [NSDate date], msg];
+         [NSDate date], message];
 
-    NSString *path = HBLogPath();
-
-    NSFileHandle *fh =
+    NSFileHandle *file =
         [NSFileHandle fileHandleForWritingAtPath:path];
 
-    if (!fh) {
-        [[NSFileManager defaultManager]
-            createFileAtPath:path
-            contents:nil
-            attributes:nil];
-
-        fh =
-            [NSFileHandle fileHandleForWritingAtPath:path];
+    if (!file) {
+        [line writeToFile:path
+               atomically:YES
+                 encoding:NSUTF8StringEncoding
+                    error:nil];
+    } else {
+        [file seekToEndOfFile];
+        [file writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
+        [file closeFile];
     }
 
-    [fh seekToEndOfFile];
-    [fh writeData:
-        [line dataUsingEncoding:NSUTF8StringEncoding]];
-    [fh closeFile];
-
-    NSLog(@"%@", msg);
+    NSLog(@"[VoicePlugin] %@", message);
 }
 
-static void HBLogStack(void) {
+#pragma mark - 原始 IMP
 
-    NSArray *stack =
-        [NSThread callStackSymbols];
+static IMP OriginalGetReVoice = NULL;
+static IMP OriginalGetNewVoiceServerList = NULL;
 
-    HBLog(@"========== CALL STACK ==========");
+#pragma mark - Hook: GetReVoice
 
-    NSUInteger count = MIN(stack.count, (NSUInteger)15);
+static void VoicePlugin_GetReVoice(id self, SEL _cmd) {
 
-    for (NSUInteger i = 0; i < count; i++) {
-        HBLog(@"STACK[%lu] %@",
-              (unsigned long)i,
-              stack[i]);
+    VoicePluginLog(@"================================");
+    VoicePluginLog(@"GetReVoice CALLED");
+    VoicePluginLog(@"self = %@", self);
+    VoicePluginLog(@"class = %@", NSStringFromClass([self class]));
+
+    NSArray *stack = [NSThread callStackSymbols];
+
+    for (NSUInteger i = 0;
+         i < MIN(stack.count, 12);
+         i++) {
+
+        VoicePluginLog(@"STACK[%lu] %@",
+                       (unsigned long)i,
+                       stack[i]);
     }
 
-    HBLog(@"========== END STACK ==========");
-}
-
-#pragma mark -
-#pragma mark Original IMP
-
-static void (*HBOriginalGetReVoice)(id, SEL);
-
-static void (*HBOriginalGetNewVoiceServerList)(
-    id,
-    SEL,
-    id
-);
-
-#pragma mark -
-#pragma mark GetReVoice
-
-static void HB_GetReVoice(id self, SEL _cmd) {
-
-    HBLog(@"========================================");
-    HBLog(@"CALL GetReVoice");
-    HBLog(@"self = %@", self);
-
-    HBLogStack();
-
-    HBLog(@"---- CALL ORIGINAL GetReVoice ----");
-
-    if (HBOriginalGetReVoice) {
-        HBOriginalGetReVoice(
-            self,
-            _cmd
-        );
+    if (OriginalGetReVoice) {
+        ((void (*)(id, SEL))
+         OriginalGetReVoice)(self, _cmd);
     }
 
-    HBLog(@"---- RETURN ORIGINAL GetReVoice ----");
+    VoicePluginLog(@"GetReVoice RETURN");
 }
 
-#pragma mark -
-#pragma mark getNewVoiceServerList:
+#pragma mark - Hook: getNewVoiceServerList:
 
-static void HB_getNewVoiceServerList(
+static void VoicePlugin_GetNewVoiceServerList(
     id self,
     SEL _cmd,
     id arg
 ) {
 
-    HBLog(@"========================================");
-    HBLog(@"CALL getNewVoiceServerList:");
-    HBLog(@"self = %@", self);
-    HBLog(@"arg class = %@", [arg class]);
-    HBLog(@"arg = %@", arg);
+    VoicePluginLog(@"================================");
+    VoicePluginLog(@"getNewVoiceServerList: CALLED");
 
-    HBLogStack();
+    if (arg) {
+        VoicePluginLog(@"arg class = %@",
+                       NSStringFromClass([arg class]));
 
-    HBLog(@"---- CALL ORIGINAL getNewVoiceServerList: ----");
+        VoicePluginLog(@"arg = %@",
+                       arg);
+    } else {
+        VoicePluginLog(@"arg = nil");
+    }
 
-    if (HBOriginalGetNewVoiceServerList) {
-        HBOriginalGetNewVoiceServerList(
+    NSArray *stack = [NSThread callStackSymbols];
+
+    for (NSUInteger i = 0;
+         i < MIN(stack.count, 12);
+         i++) {
+
+        VoicePluginLog(@"STACK[%lu] %@",
+                       (unsigned long)i,
+                       stack[i]);
+    }
+
+    if (OriginalGetNewVoiceServerList) {
+        ((void (*)(id, SEL, id))
+         OriginalGetNewVoiceServerList)(
             self,
             _cmd,
             arg
         );
     }
 
-    HBLog(@"---- RETURN ORIGINAL getNewVoiceServerList: ----");
+    VoicePluginLog(@"getNewVoiceServerList: RETURN");
 }
 
-#pragma mark -
-#pragma mark Install
+#pragma mark - 安装 Hook
 
-static void HBInstallTrace(void) {
+static BOOL VoicePluginInstallHooks(void) {
 
-    Class cls =
-        NSClassFromString(@"VoiceSelectController");
+    Class cls = NSClassFromString(@"VoiceSelectController");
 
     if (!cls) {
-        HBLog(@"VoiceSelectController NOT FOUND");
-        return;
+        VoicePluginLog(@"VoiceSelectController NOT FOUND");
+        return NO;
     }
 
-    HBLog(@"VoiceSelectController FOUND");
+    VoicePluginLog(@"VoiceSelectController FOUND");
 
-    /*
-     * GetReVoice
-     */
-
-    Method method =
+    Method reVoiceMethod =
         class_getInstanceMethod(
             cls,
             @selector(GetReVoice)
         );
 
-    if (method) {
+    if (reVoiceMethod) {
 
-        IMP original =
-            method_getImplementation(method);
-
-        HBOriginalGetReVoice =
-            (void (*)(id, SEL))original;
+        OriginalGetReVoice =
+            method_getImplementation(reVoiceMethod);
 
         method_setImplementation(
-            method,
-            (IMP)HB_GetReVoice
+            reVoiceMethod,
+            (IMP)VoicePlugin_GetReVoice
         );
 
-        HBLog(@"HOOKED GetReVoice");
-        HBLog(@"ORIGINAL IMP = %p",
-              original);
+        VoicePluginLog(
+            @"Hooked GetReVoice, original IMP = %p",
+            OriginalGetReVoice
+        );
+    } else {
+        VoicePluginLog(@"GetReVoice NOT FOUND");
     }
 
-    /*
-     * getNewVoiceServerList:
-     */
-
-    method =
+    Method serverMethod =
         class_getInstanceMethod(
             cls,
             @selector(getNewVoiceServerList:)
         );
 
-    if (method) {
+    if (serverMethod) {
 
-        IMP original =
-            method_getImplementation(method);
-
-        HBOriginalGetNewVoiceServerList =
-            (void (*)(id, SEL, id))original;
+        OriginalGetNewVoiceServerList =
+            method_getImplementation(serverMethod);
 
         method_setImplementation(
-            method,
-            (IMP)HB_getNewVoiceServerList
+            serverMethod,
+            (IMP)VoicePlugin_GetNewVoiceServerList
         );
 
-        HBLog(@"HOOKED getNewVoiceServerList:");
-        HBLog(@"ORIGINAL IMP = %p",
-              original);
+        VoicePluginLog(
+            @"Hooked getNewVoiceServerList:, original IMP = %p",
+            OriginalGetNewVoiceServerList
+        );
+    } else {
+        VoicePluginLog(
+            @"getNewVoiceServerList: NOT FOUND"
+        );
     }
 
-    HBLog(@"========================================");
-    HBLog(@"TRACE INSTALL FINISHED");
+    return YES;
 }
 
-#pragma mark -
-#pragma mark Constructor
+#pragma mark - 启动
 
 __attribute__((constructor))
-static void HBInit(void) {
+static void VoicePluginInit(void) {
 
-    HBLog(@"========================================");
-    HBLog(@"HB CALL TRACE V2 LOADED");
-    HBLog(@"PROCESS = %@",
-          [[NSProcessInfo processInfo] processName]);
+    @autoreleasepool {
 
-    dispatch_after(
-        dispatch_time(
-            DISPATCH_TIME_NOW,
-            (int64_t)(5.0 * NSEC_PER_SEC)
-        ),
-        dispatch_get_main_queue(),
-        ^{
-            HBInstallTrace();
-        }
-    );
+        VoicePluginLog(@"================================");
+        VoicePluginLog(@"VoicePlugin START");
+        VoicePluginLog(@"PID = %d", getpid());
+        VoicePluginLog(@"Process = %@",
+                       [[NSProcessInfo processInfo] processName]);
+
+        dispatch_after(
+            dispatch_time(
+                DISPATCH_TIME_NOW,
+                (int64_t)(5 * NSEC_PER_SEC)
+            ),
+            dispatch_get_main_queue(),
+            ^{
+                VoicePluginInstallHooks();
+            }
+        );
+    }
 }
