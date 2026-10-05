@@ -252,6 +252,8 @@ static void VR051Open(void) {
     [window addSubview:button];
 }
 
+@implementation VR051Launcher (Open)
+
 + (void)open:(UIButton *)sender {
 
     UIWindow *window = sender.window;
