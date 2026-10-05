@@ -1493,125 +1493,223 @@ static void HBShowAlert(
 
 @end
 
-
 #pragma mark - WeChat Setting Controller
 
-@interface NewSettingViewController
-    : UIViewController
+static IMP HBOriginalViewDidAppearIMP = NULL;
 
-@end
-
-
-@implementation NewSettingViewController
-    (HBVoicePlugin)
-
-- (void)HBVoice_viewDidAppear:
-    (BOOL)animated
+static void HBVoiceViewDidAppear(id self, SEL _cmd, BOOL animated)
 {
-    [self HBVoice_viewDidAppear:animated];
+    // 先执行微信原来的 viewDidAppear:
+    if (HBOriginalViewDidAppearIMP) {
+        ((void (*)(id, SEL, BOOL))HBOriginalViewDidAppearIMP)(
+            self,
+            _cmd,
+            animated
+        );
+    }
 
-
+    // 等微信自己的界面完成后，再添加我们的按钮
     dispatch_after(
         dispatch_time(
             DISPATCH_TIME_NOW,
-            (int64_t)(
-                0.5 *
-                NSEC_PER_SEC
-            )
+            (int64_t)(0.5 * NSEC_PER_SEC)
         ),
         dispatch_get_main_queue(),
         ^{
+            UIViewController *vc =
+                (UIViewController *)self;
 
-            [self HBInstallVoiceButton];
+            if (!vc.view) {
+                return;
+            }
+
+            // 防止重复添加
+            UIView *oldButton =
+                [vc.view viewWithTag:884233];
+
+            if (oldButton) {
+                return;
+            }
+
+            CGFloat width =
+                vc.view.bounds.size.width;
+
+            CGFloat height =
+                vc.view.bounds.size.height;
+
+            UIButton *button =
+                [UIButton buttonWithType:
+                    UIButtonTypeSystem];
+
+            button.tag = 884233;
+
+            button.frame =
+                CGRectMake(
+                    20,
+                    height - 90,
+                    width - 40,
+                    48
+                );
+
+            button.backgroundColor =
+                [UIColor colorWithWhite:0.95 alpha:1.0];
+
+            button.layer.cornerRadius = 10;
+
+            [button setTitle:
+                @"语音工具"
+              forState:
+                UIControlStateNormal];
+
+            button.titleLabel.font =
+                [UIFont systemFontOfSize:16];
+
+            [button addTarget:
+                vc
+                action:
+                    @selector(HBOpenVoiceTool)
+                forControlEvents:
+                    UIControlEventTouchUpInside];
+
+            [vc.view addSubview:button];
         }
     );
 }
 
 
-- (void)HBInstallVoiceButton
+static void HBOpenVoiceTool(id self, SEL _cmd)
 {
-    UIView *oldButton =
-        [self.view viewWithTag:884233];
+    UIViewController *vc =
+        (UIViewController *)self;
 
-    if (oldButton) {
-        return;
-    }
-
-
-    CGFloat width =
-        self.view.bounds.size.width;
-
-
-    CGFloat height =
-        self.view.bounds.size.height;
-
-
-    UIButton *button =
-        [UIButton buttonWithType:
-            UIButtonTypeSystem];
-
-
-    button.tag =
-        884233;
-
-
-    button.frame =
-        CGRectMake(
-            20,
-            height - 90,
-            width - 40,
-            48
-        );
-
-
-    button.backgroundColor =
-        [UIColor colorWithWhite:0.95 alpha:1.0];
-
-
-    button.layer.cornerRadius =
-        10;
-
-
-    [button setTitle:
-        @"语音工具"
-      forState:
-        UIControlStateNormal];
-
-
-    button.titleLabel.font =
-        [UIFont systemFontOfSize:16];
-
-
-    [button addTarget:self
-               action:@selector(HBOpenVoiceTool)
-     forControlEvents:
-         UIControlEventTouchUpInside];
-
-
-    [self.view addSubview:button];
-}
-
-
-- (void)HBOpenVoiceTool
-{
-    HBVoiceToolViewController *vc =
+    HBVoiceToolViewController *toolVC =
         [[HBVoiceToolViewController alloc]
             initWithStyle:
                 UITableViewStyleGrouped];
 
-
     UINavigationController *nav =
         [[UINavigationController alloc]
-            initWithRootViewController:vc];
+            initWithRootViewController:toolVC];
 
-
-    [self presentViewController:
+    [vc presentViewController:
         nav
         animated:YES
         completion:nil];
 }
 
-@end
+
+#pragma mark - Install Hook
+
+static void HBInstallSettingHook(void)
+{
+    Class cls =
+        NSClassFromString(
+            @"NewSettingViewController"
+        );
+
+    if (!cls) {
+
+        NSLog(
+            @"[HBVoice] NewSettingViewController not found"
+        );
+
+        return;
+    }
+
+
+    SEL originalSEL =
+        @selector(viewDidAppear:);
+
+    SEL replacementSEL =
+        @selector(HBVoice_viewDidAppear:);
+
+    Method originalMethod =
+        class_getInstanceMethod(
+            cls,
+            originalSEL
+        );
+
+    if (!originalMethod) {
+
+        NSLog(
+            @"[HBVoice] viewDidAppear: not found"
+        );
+
+        return;
+    }
+
+
+    // 把我们的 C 函数注册成微信类的新方法
+    BOOL added =
+        class_addMethod(
+            cls,
+            replacementSEL,
+            (IMP)HBVoiceViewDidAppear,
+            "v@:B"
+        );
+
+    if (!added) {
+
+        NSLog(
+            @"[HBVoice] replacement method already exists"
+        );
+
+        return;
+    }
+
+
+    // 添加“打开语音工具”的方法
+    class_addMethod(
+        cls,
+        @selector(HBOpenVoiceTool),
+        (IMP)HBOpenVoiceTool,
+        "v@:"
+    );
+
+
+    // 保存微信原来的实现
+    HBOriginalViewDidAppearIMP =
+        method_getImplementation(
+            originalMethod
+        );
+
+
+    Method replacementMethod =
+        class_getInstanceMethod(
+            cls,
+            replacementSEL
+        );
+
+    if (!replacementMethod) {
+
+        NSLog(
+            @"[HBVoice] replacement method not found"
+        );
+
+        return;
+    }
+
+
+    // 交换：
+    //
+    // viewDidAppear:
+    //      ↓
+    // HBVoiceViewDidAppear
+    //
+    // HBVoice_viewDidAppear:
+    //      ↓
+    // 原来的微信实现
+
+    method_exchangeImplementations(
+        originalMethod,
+        replacementMethod
+    );
+
+
+    NSLog(
+        @"[HBVoice] Setting hook installed successfully"
+    );
+}
 
 
 #pragma mark - Constructor
@@ -1624,7 +1722,7 @@ static void HBVoicePluginInit(void)
     );
 
     NSLog(
-        @"[HBVoice] Plugin V2.2 iOS12"
+        @"[HBVoice] Plugin V2.2"
     );
 
     NSLog(
@@ -1639,7 +1737,6 @@ static void HBVoicePluginInit(void)
     dispatch_async(
         dispatch_get_main_queue(),
         ^{
-
             dispatch_after(
                 dispatch_time(
                     DISPATCH_TIME_NOW,
@@ -1650,66 +1747,7 @@ static void HBVoicePluginInit(void)
                 ),
                 dispatch_get_main_queue(),
                 ^{
-
-                    Class cls =
-                        NSClassFromString(
-                            @"NewSettingViewController"
-                        );
-
-
-                    if (!cls) {
-
-                        NSLog(
-                            @"[HBVoice] "
-                             "NewSettingViewController "
-                             "not found"
-                        );
-
-                        return;
-                    }
-
-
-                    Method original =
-                        class_getInstanceMethod(
-                            cls,
-                            @selector(
-                                viewDidAppear:
-                            )
-                        );
-
-
-                    Method replacement =
-                        class_getInstanceMethod(
-                            cls,
-                            @selector(
-                                HBVoice_viewDidAppear:
-                            )
-                        );
-
-
-                    if (!original ||
-                        !replacement) {
-
-                        NSLog(
-                            @"[HBVoice] "
-                             "viewDidAppear method "
-                             "not found"
-                        );
-
-                        return;
-                    }
-
-
-                    method_exchangeImplementations(
-                        original,
-                        replacement
-                    );
-
-
-                    NSLog(
-                        @"[HBVoice] "
-                         "Setting hook installed"
-                    );
+                    HBInstallSettingHook();
                 }
             );
         }
