@@ -3,7 +3,7 @@
 #import <QuartzCore/QuartzCore.h>
 #import <objc/runtime.h>
 
-#pragma mark - 顶层调试窗口
+#pragma mark - 调试窗口
 
 static UIWindow *HBDebugWindow = nil;
 
@@ -17,48 +17,83 @@ static void HBShow(NSString *text) {
                 [[UIWindow alloc] initWithFrame:
                  [UIScreen mainScreen].bounds];
 
-            // 放到系统弹窗之上
-            HBDebugWindow.windowLevel = UIWindowLevelAlert + 100;
-            HBDebugWindow.backgroundColor = [UIColor clearColor];
+            HBDebugWindow.windowLevel =
+                UIWindowLevelAlert + 100;
 
-            UIViewController *vc = [UIViewController new];
-            vc.view.backgroundColor = [UIColor clearColor];
+            HBDebugWindow.backgroundColor =
+                [UIColor clearColor];
+
+            // 关键：不拦截微信的触摸
+            HBDebugWindow.userInteractionEnabled = NO;
+
+            UIViewController *vc =
+                [UIViewController new];
+
+            vc.view.backgroundColor =
+                [UIColor clearColor];
 
             HBDebugWindow.rootViewController = vc;
+
             HBDebugWindow.hidden = NO;
         }
 
-        UIViewController *vc = HBDebugWindow.rootViewController;
+        UIViewController *vc =
+            HBDebugWindow.rootViewController;
 
-        UILabel *label = [vc.view viewWithTag:9527];
+        UILabel *label =
+            [vc.view viewWithTag:9527];
 
         if (!label) {
 
             label =
-                [[UILabel alloc] initWithFrame:
-                 CGRectMake(15,
-                            80,
-                            [UIScreen mainScreen].bounds.size.width - 30,
-                            320)];
+                [[UILabel alloc]
+                 initWithFrame:
+                 CGRectMake(
+                     15,
+                     80,
+                     [UIScreen mainScreen].bounds.size.width - 30,
+                     320
+                 )];
 
             label.tag = 9527;
 
             label.numberOfLines = 0;
-            label.font = [UIFont systemFontOfSize:14];
-            label.textColor = [UIColor whiteColor];
+
+            label.font =
+                [UIFont systemFontOfSize:14];
+
+            label.textColor =
+                [UIColor whiteColor];
 
             label.backgroundColor =
-                [[UIColor blackColor] colorWithAlphaComponent:0.90];
+                [[UIColor blackColor]
+                 colorWithAlphaComponent:0.90];
 
             label.layer.cornerRadius = 12;
+
             label.layer.masksToBounds = YES;
 
-            label.textAlignment = NSTextAlignmentLeft;
+            label.textAlignment =
+                NSTextAlignmentLeft;
 
             [vc.view addSubview:label];
         }
 
         label.text = text;
+
+        HBDebugWindow.hidden = NO;
+
+        // 8 秒后自动隐藏
+        dispatch_after(
+            dispatch_time(
+                DISPATCH_TIME_NOW,
+                8 * NSEC_PER_SEC
+            ),
+            dispatch_get_main_queue(),
+            ^{
+                HBDebugWindow.hidden = YES;
+            }
+        );
     });
 }
 
@@ -71,24 +106,36 @@ static void HookVoiceController(void) {
 
     if (!cls) {
 
-        NSLog(@"[VoiceRebuild] VoiceSelectController not found");
+        NSLog(
+            @"[VoiceRebuild] VoiceSelectController not found"
+        );
 
-        HBShow(@"HB语音拦截\n\n❌ 找不到 VoiceSelectController");
+        HBShow(
+            @"HB语音拦截\n\n"
+             "❌ 找不到 VoiceSelectController"
+        );
 
         return;
     }
 
     SEL sel =
-        NSSelectorFromString(@"getNewVoiceServerList:");
+        NSSelectorFromString(
+            @"getNewVoiceServerList:"
+        );
 
     Method method =
         class_getInstanceMethod(cls, sel);
 
     if (!method) {
 
-        NSLog(@"[VoiceRebuild] getNewVoiceServerList: not found");
+        NSLog(
+            @"[VoiceRebuild] getNewVoiceServerList: not found"
+        );
 
-        HBShow(@"HB语音拦截\n\n❌ 找不到 getNewVoiceServerList:");
+        HBShow(
+            @"HB语音拦截\n\n"
+             "❌ 找不到 getNewVoiceServerList:"
+        );
 
         return;
     }
@@ -96,7 +143,11 @@ static void HookVoiceController(void) {
     IMP oldIMP =
         method_getImplementation(method);
 
-    typedef void (*VoiceFunc)(id, SEL, id);
+    typedef void (*VoiceFunc)(
+        id,
+        SEL,
+        id
+    );
 
     VoiceFunc original =
         (VoiceFunc)oldIMP;
@@ -105,10 +156,22 @@ static void HookVoiceController(void) {
         imp_implementationWithBlock(
             ^void(id self, id arg) {
 
-                NSLog(@"[VoiceRebuild] ===================");
-                NSLog(@"[VoiceRebuild] HB VOICE SERVER");
-                NSLog(@"[VoiceRebuild] argument = %@", arg);
-                NSLog(@"[VoiceRebuild] ===================");
+                NSLog(
+                    @"[VoiceRebuild] ==================="
+                );
+
+                NSLog(
+                    @"[VoiceRebuild] HB VOICE SERVER"
+                );
+
+                NSLog(
+                    @"[VoiceRebuild] argument = %@",
+                    arg
+                );
+
+                NSLog(
+                    @"[VoiceRebuild] ==================="
+                );
 
                 NSString *info =
                     [NSString stringWithFormat:
@@ -120,8 +183,8 @@ static void HookVoiceController(void) {
                      arg];
 
                 /*
-                 * 等 HB 自己的“获取成功，音色已更新”
-                 * 弹窗消失以后，再显示我们的内容。
+                 * 等 HB 原来的提示框消失后
+                 * 再显示我们的信息。
                  */
                 dispatch_after(
                     dispatch_time(
@@ -134,19 +197,28 @@ static void HookVoiceController(void) {
                     }
                 );
 
-                // 继续执行 HB 原来的方法
-                original(self, sel, arg);
+                // 执行 HB 原来的方法
+                original(
+                    self,
+                    sel,
+                    arg
+                );
             }
         );
 
-    method_setImplementation(method, newIMP);
+    method_setImplementation(
+        method,
+        newIMP
+    );
 
-    NSLog(@"[VoiceRebuild] Hook installed!");
+    NSLog(
+        @"[VoiceRebuild] Hook installed!"
+    );
 
     HBShow(
         @"HB语音拦截\n\n"
          "✅ Hook 成功\n\n"
-         "等待你点击“获取音色”..."
+         "现在点击“获取音色”..."
     );
 }
 
@@ -157,10 +229,12 @@ static void VoiceRebuildInjectTest_Loaded(void) {
 
     @autoreleasepool {
 
-        NSLog(@"[VoiceRebuild] loaded successfully");
+        NSLog(
+            @"[VoiceRebuild] loaded successfully"
+        );
 
         /*
-         * 等微信和 HB 助手初始化完成以后再 Hook。
+         * 等微信和 HB 初始化完成
          */
         dispatch_after(
             dispatch_time(
