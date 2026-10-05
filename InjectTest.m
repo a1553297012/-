@@ -1,420 +1,247 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
-#include <unistd.h>
-
-#pragma mark - Logger
 
 static NSString *HBLogPath(void) {
-
-    NSArray *paths =
-        NSSearchPathForDirectoriesInDomains(
-            NSDocumentDirectory,
-            NSUserDomainMask,
-            YES
-        );
-
-    NSString *documents = [paths firstObject];
-
-    if (!documents) {
-        return nil;
-    }
-
-    return [documents stringByAppendingPathComponent:
-        @"HBInjectTest.log"];
+    NSArray *paths = NSSearchPathForDirectoriesInDomains(
+        NSDocumentDirectory,
+        NSUserDomainMask,
+        YES
+    );
+    NSString *documents = paths.firstObject;
+    return [documents stringByAppendingPathComponent:@"HBCallTrace.log"];
 }
 
-static void HBWriteLog(NSString *text) {
+static void HBLog(NSString *format, ...) {
+    va_list args;
+    va_start(args, format);
 
-    if (!text) {
-        return;
+    NSString *msg = [[NSString alloc] initWithFormat:format arguments:args];
+
+    va_end(args);
+
+    NSString *line = [NSString stringWithFormat:
+                      @"[%@] %@\n",
+                      [NSDate date],
+                      msg];
+
+    NSFileHandle *fh =
+        [NSFileHandle fileHandleForWritingAtPath:HBLogPath()];
+
+    if (!fh) {
+        [[NSFileManager defaultManager]
+            createFileAtPath:HBLogPath()
+            contents:nil
+            attributes:nil];
+
+        fh = [NSFileHandle fileHandleForWritingAtPath:HBLogPath()];
     }
 
-    @autoreleasepool {
+    [fh seekToEndOfFile];
+    [fh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
+    [fh closeFile];
 
-        NSString *line =
-            [NSString stringWithFormat:
-                @"[%@] %@\n",
-                [NSDate date],
-                text];
-
-        NSLog(@"[HB-SCAN] %@", text);
-
-        NSString *path = HBLogPath();
-
-        if (!path) {
-            return;
-        }
-
-        NSFileHandle *handle =
-            [NSFileHandle fileHandleForWritingAtPath:path];
-
-        if (!handle) {
-
-            NSError *error = nil;
-
-            [line writeToFile:path
-                   atomically:YES
-                     encoding:NSUTF8StringEncoding
-                        error:&error];
-
-            if (error) {
-
-                NSLog(
-                    @"[HB-SCAN] 创建日志失败: %@",
-                    error
-                );
-            }
-
-            return;
-        }
-
-        @try {
-
-            [handle seekToEndOfFile];
-
-            NSData *data =
-                [line dataUsingEncoding:
-                    NSUTF8StringEncoding];
-
-            [handle writeData:data];
-
-            [handle closeFile];
-
-        } @catch (NSException *exception) {
-
-            NSLog(
-                @"[HB-SCAN] 写日志异常: %@",
-                exception
-            );
-
-            @try {
-                [handle closeFile];
-            } @catch (...) {
-            }
-        }
-    }
+    NSLog(@"%@", msg);
 }
 
-#pragma mark - Method Information
+#pragma mark - GetNewVoiceServerList
 
-static void HBScanMethod(
-    Class cls,
-    NSString *selectorName
+static void HB_getNewVoiceServerList(id self, SEL _cmd, id arg) {
+    HBLog(@"========================================");
+    HBLog(@"CALL getNewVoiceServerList:");
+    HBLog(@"self = %@", self);
+    HBLog(@"arg class = %@", [arg class]);
+    HBLog(@"arg = %@", arg);
+
+    // 不改变原逻辑：
+    // 这里暂时不调用原 IMP，只用于确认是否会触发。
+    HBLog(@"getNewVoiceServerList: 被调用");
+}
+
+#pragma mark - GetVoiceServerList
+
+static id HB_GetVoiceServerList(id self, SEL _cmd) {
+    HBLog(@"========================================");
+    HBLog(@"CALL GetVoiceServerList");
+    HBLog(@"self = %@", self);
+
+    HBLog(@"GetVoiceServerList 被调用");
+
+    return nil;
+}
+
+#pragma mark - GetReVoice
+
+static void HB_GetReVoice(id self, SEL _cmd) {
+    HBLog(@"========================================");
+    HBLog(@"CALL GetReVoice");
+    HBLog(@"self = %@", self);
+
+    HBLog(@"GetReVoice 被调用");
+}
+
+#pragma mark - getVoiceSelectKey:
+
+static void HB_getVoiceSelectKey(id self, SEL _cmd, id arg) {
+    HBLog(@"========================================");
+    HBLog(@"CALL getVoiceSelectKey:");
+    HBLog(@"arg class = %@", [arg class]);
+    HBLog(@"arg = %@", arg);
+
+    HBLog(@"getVoiceSelectKey: 被调用");
+}
+
+#pragma mark - parseVoiceData:forType:completion:
+
+static void HB_parseVoiceData(
+    id self,
+    SEL _cmd,
+    id data,
+    id type,
+    id completion
 ) {
+    HBLog(@"========================================");
+    HBLog(@"CALL parseVoiceData:forType:completion:");
+    HBLog(@"data class = %@", [data class]);
+    HBLog(@"data = %@", data);
+    HBLog(@"type class = %@", [type class]);
+    HBLog(@"type = %@", type);
+    HBLog(@"completion class = %@", [completion class]);
 
-    if (!cls || !selectorName) {
-        return;
+    if ([data isKindOfClass:[NSData class]]) {
+        NSData *d = data;
+
+        HBLog(@"NSData length = %lu",
+              (unsigned long)d.length);
+
+        NSString *text =
+            [[NSString alloc] initWithData:d
+                                  encoding:NSUTF8StringEncoding];
+
+        if (text) {
+            HBLog(@"NSData UTF8 = %@", text);
+        }
     }
 
-    HBWriteLog(
-        [NSString stringWithFormat:
-            @"----------------------------------------"]
-    );
-
-    HBWriteLog(
-        [NSString stringWithFormat:
-            @"Searching method: %@",
-            selectorName]
-    );
-
-    SEL selector =
-        NSSelectorFromString(selectorName);
-
-    Method method =
-        class_getInstanceMethod(
-            cls,
-            selector
-        );
-
-    if (!method) {
-
-        HBWriteLog(
-            [NSString stringWithFormat:
-                @"METHOD NOT FOUND: %@",
-                selectorName]
-        );
-
-        return;
-    }
-
-    const char *encoding =
-        method_getTypeEncoding(method);
-
-    unsigned int argumentCount =
-        method_getNumberOfArguments(method);
-
-    IMP implementation =
-        method_getImplementation(method);
-
-    HBWriteLog(
-        [NSString stringWithFormat:
-            @"METHOD FOUND: %@",
-            selectorName]
-    );
-
-    HBWriteLog(
-        [NSString stringWithFormat:
-            @"TYPE ENCODING: %s",
-            encoding ? encoding : "(null)"]
-    );
-
-    HBWriteLog(
-        [NSString stringWithFormat:
-            @"ARGUMENT COUNT: %u",
-            argumentCount]
-    );
-
-    HBWriteLog(
-        [NSString stringWithFormat:
-            @"IMP ADDRESS: %p",
-            implementation]
-    );
-
-    /*
-     * 输出每一个参数的类型编码。
-     */
-
-    for (unsigned int i = 0;
-         i < argumentCount;
-         i++) {
-
-        char buffer[256] = {0};
-
-        method_getArgumentType(
-            method,
-            i,
-            buffer,
-            sizeof(buffer)
-        );
-
-        HBWriteLog(
-            [NSString stringWithFormat:
-                @"ARG[%u] TYPE: %s",
-                i,
-                buffer]
-        );
-    }
+    HBLog(@"parseVoiceData: 被调用");
 }
 
-#pragma mark - Scan Class
+#pragma mark - Scan
 
-static void HBScanVoiceController(void) {
+static void HBInstallTrace(void) {
 
-    HBWriteLog(
-        @"========================================"
-    );
-
-    HBWriteLog(
-        @"START VoiceSelectController SCAN"
-    );
-
-    Class cls =
-        NSClassFromString(
-            @"VoiceSelectController"
-        );
+    Class cls = NSClassFromString(@"VoiceSelectController");
 
     if (!cls) {
-
-        HBWriteLog(
-            @"VoiceSelectController NOT FOUND"
-        );
-
-        HBWriteLog(
-            @"========================================"
-        );
-
+        HBLog(@"VoiceSelectController NOT FOUND");
         return;
     }
 
-    HBWriteLog(
-        @"VoiceSelectController FOUND"
-    );
-
-    HBWriteLog(
-        [NSString stringWithFormat:
-            @"CLASS ADDRESS: %p",
-            cls]
-    );
-
-    Class superClass =
-        class_getSuperclass(cls);
-
-    if (superClass) {
-
-        HBWriteLog(
-            [NSString stringWithFormat:
-                @"SUPER CLASS: %@",
-                NSStringFromClass(superClass)]
-        );
-    }
+    HBLog(@"VoiceSelectController FOUND");
 
     /*
-     * 检查我们之前关注的方法。
+     * 注意：
+     * 当前版本只是替换 IMP 来观察调用。
+     * 这意味着这些方法如果被调用，原方法逻辑不会执行。
+     *
+     * 这是故意的诊断步骤。
      */
 
-    HBScanMethod(
+    Method m;
+
+    m = class_getInstanceMethod(
         cls,
-        @"getNewVoiceServerList:"
+        @selector(getNewVoiceServerList:)
     );
 
-    HBScanMethod(
-        cls,
-        @"GetVoiceServerList"
-    );
-
-    HBScanMethod(
-        cls,
-        @"GetReVoice"
-    );
-
-    /*
-     * 输出该类自己的实例方法列表。
-     */
-
-    unsigned int methodCount = 0;
-
-    Method *methods =
-        class_copyMethodList(
-            cls,
-            &methodCount
+    if (m) {
+        method_setImplementation(
+            m,
+            (IMP)HB_getNewVoiceServerList
         );
 
-    HBWriteLog(
-        [NSString stringWithFormat:
-            @"INSTANCE METHOD COUNT: %u",
-            methodCount]
-    );
-
-    if (methods) {
-
-        for (unsigned int i = 0;
-             i < methodCount;
-             i++) {
-
-            SEL selector =
-                method_getName(methods[i]);
-
-            const char *name =
-                sel_getName(selector);
-
-            if (name) {
-
-                HBWriteLog(
-                    [NSString stringWithFormat:
-                        @"METHOD[%u]: %s",
-                        i,
-                        name]
-                );
-            }
-        }
-
-        free(methods);
+        HBLog(@"HOOKED getNewVoiceServerList:");
     }
 
-    HBWriteLog(
-        @"END VoiceSelectController SCAN"
+    m = class_getInstanceMethod(
+        cls,
+        @selector(GetVoiceServerList)
     );
 
-    HBWriteLog(
-        @"========================================"
+    if (m) {
+        method_setImplementation(
+            m,
+            (IMP)HB_GetVoiceServerList
+        );
+
+        HBLog(@"HOOKED GetVoiceServerList");
+    }
+
+    m = class_getInstanceMethod(
+        cls,
+        @selector(GetReVoice)
     );
+
+    if (m) {
+        method_setImplementation(
+            m,
+            (IMP)HB_GetReVoice
+        );
+
+        HBLog(@"HOOKED GetReVoice");
+    }
+
+    m = class_getInstanceMethod(
+        cls,
+        @selector(getVoiceSelectKey:)
+    );
+
+    if (m) {
+        method_setImplementation(
+            m,
+            (IMP)HB_getVoiceSelectKey
+        );
+
+        HBLog(@"HOOKED getVoiceSelectKey:");
+    }
+
+    m = class_getInstanceMethod(
+        cls,
+        @selector(parseVoiceData:forType:completion:)
+    );
+
+    if (m) {
+        method_setImplementation(
+            m,
+            (IMP)HB_parseVoiceData
+        );
+
+        HBLog(@"HOOKED parseVoiceData:forType:completion:");
+    }
+
+    HBLog(@"========================================");
+    HBLog(@"TRACE INSTALL FINISHED");
 }
 
-#pragma mark - Delayed Scan
+__attribute__((constructor))
+static void HBInit(void) {
 
-static void HBStartScan(void) {
-
-    HBWriteLog(
-        @"========================================"
-    );
-
-    HBWriteLog(
-        @"HB SCAN START"
-    );
-
-    HBWriteLog(
-        @"InjectTest.m is running"
-    );
-
-    HBWriteLog(
-        [NSString stringWithFormat:
-            @"PROCESS ID: %d",
-            getpid()]
-    );
-
-    HBWriteLog(
-        [NSString stringWithFormat:
-            @"PROCESS NAME: %@",
-            [[NSProcessInfo processInfo] processName]]
-    );
-
-    HBWriteLog(
-        [NSString stringWithFormat:
-            @"LOG PATH: %@",
-            HBLogPath()]
-    );
-
-    HBWriteLog(
-        @"NO HOOK"
-    );
-
-    HBWriteLog(
-        @"NO METHOD MODIFICATION"
-    );
-
-    HBWriteLog(
-        @"NO ALERT"
-    );
-
-    HBWriteLog(
-        @"========================================"
-    );
+    HBLog(@"========================================");
+    HBLog(@"HB CALL TRACE LOADED");
+    HBLog(@"PROCESS = %@", [[NSProcessInfo processInfo] processName]);
 
     /*
-     * 延迟几秒，给微信自己的类加载时间。
+     * 延迟一点，确保微信相关类已经加载。
      */
-
     dispatch_after(
         dispatch_time(
             DISPATCH_TIME_NOW,
-            5 * NSEC_PER_SEC
+            (int64_t)(5.0 * NSEC_PER_SEC)
         ),
         dispatch_get_main_queue(),
         ^{
-
-            HBWriteLog(
-                @"5 seconds elapsed"
-            );
-
-            HBScanVoiceController();
+            HBLog(@"START INSTALL TRACE");
+            HBInstallTrace();
         }
     );
-}
-
-#pragma mark - Constructor
-
-__attribute__((constructor))
-static void HBInjectTestConstructor(void) {
-
-    @autoreleasepool {
-
-        HBWriteLog(
-            @"########################################"
-        );
-
-        HBWriteLog(
-            @"HB INJECT TEST CONSTRUCTOR"
-        );
-
-        HBWriteLog(
-            @"InjectTest.m LOADED"
-        );
-
-        HBWriteLog(
-            @"########################################"
-        );
-
-        HBStartScan();
-    }
 }
