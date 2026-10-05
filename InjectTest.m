@@ -2,193 +2,108 @@
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 
-static void VTWrite(NSString *text) {
-    NSString *path = @"/var/mobile/VoiceTrace.log";
-
-    NSString *line =
-    [NSString stringWithFormat:@"%@\n", text];
-
-    NSFileHandle *file =
-    [NSFileHandle fileHandleForWritingAtPath:path];
-
-    if (!file) {
-        [line writeToFile:path
-               atomically:YES
-                 encoding:NSUTF8StringEncoding
-                    error:nil];
-        return;
-    }
-
-    [file seekToEndOfFile];
-
-    [file writeData:
-        [line dataUsingEncoding:NSUTF8StringEncoding]];
-
-    [file closeFile];
-}
-
-static BOOL VTIsInteresting(NSString *url) {
-    NSString *s = url.lowercaseString;
-
-    return
-    [s containsString:@"voice"] ||
-    [s containsString:@"model"] ||
-    [s containsString:@"senhang"] ||
-    [s containsString:@"silk"] ||
-    [s containsString:@"speech"] ||
-    [s containsString:@"audio"] ||
-    [s containsString:@"pcm"] ||
-    [s containsString:@"ovmodel"];
-}
-
-static void VTShowURL(NSString *url) {
-
+static void HBShow(NSString *text) {
     dispatch_async(dispatch_get_main_queue(), ^{
+        UIWindow *window = nil;
 
-        UIAlertController *a =
-        [UIAlertController
-         alertControllerWithTitle:@"VoiceTrace"
-         message:url
-         preferredStyle:UIAlertControllerStyleAlert];
+        if (@available(iOS 13.0, *)) {
+            for (UIScene *scene in [UIApplication sharedApplication].connectedScenes) {
+                if (scene.activationState == UISceneActivationStateForegroundActive &&
+                    [scene isKindOfClass:[UIWindowScene class]]) {
+                    for (UIWindow *w in ((UIWindowScene *)scene).windows) {
+                        if (w.isKeyWindow) {
+                            window = w;
+                            break;
+                        }
+                    }
+                }
+                if (window) break;
+            }
+        }
 
-        [a addAction:
-         [UIAlertAction
-          actionWithTitle:@"确定"
-          style:UIAlertActionStyleDefault
-          handler:nil]];
+        if (!window) {
+            window = [UIApplication sharedApplication].keyWindow;
+        }
 
-        UIWindow *window =
-        [UIApplication sharedApplication].keyWindow;
+        if (!window) return;
 
-        UIViewController *vc =
-        window.rootViewController;
+        UIAlertController *alert =
+        [UIAlertController alertControllerWithTitle:@"HB语音拦截"
+                                            message:text
+                                     preferredStyle:UIAlertControllerStyleAlert];
+
+        [alert addAction:
+         [UIAlertAction actionWithTitle:@"确定"
+                                  style:UIAlertActionStyleDefault
+                                handler:nil]];
+
+        UIViewController *vc = window.rootViewController;
 
         while (vc.presentedViewController) {
             vc = vc.presentedViewController;
         }
 
-        if (vc) {
-            [vc presentViewController:a
-                              animated:YES
-                            completion:nil];
-        }
+        [vc presentViewController:alert animated:YES completion:nil];
     });
 }
 
-#pragma mark - NSURLSession
+static void HookVoiceController(void) {
 
-@interface NSURLSession (VoiceTrace)
+    Class cls = NSClassFromString(@"VoiceSelectController");
 
-- (NSURLSessionDataTask *)
-vt_dataTaskWithRequest:(NSURLRequest *)request
-completionHandler:(void (^)(NSData *,
-                            NSURLResponse *,
-                            NSError *))completionHandler;
-
-@end
-
-@implementation NSURLSession (VoiceTrace)
-
-- (NSURLSessionDataTask *)
-vt_dataTaskWithRequest:(NSURLRequest *)request
-completionHandler:(void (^)(NSData *,
-                            NSURLResponse *,
-                            NSError *))completionHandler {
-
-    NSString *url =
-    request.URL.absoluteString ?: @"";
-
-    VTWrite([NSString stringWithFormat:
-             @"[REQUEST] %@", url]);
-
-    if (VTIsInteresting(url)) {
-        VTWrite(@"[INTERESTING]");
-        VTShowURL(url);
+    if (!cls) {
+        NSLog(@"[VoiceRebuild] VoiceSelectController not found");
+        return;
     }
 
-    return
-    [self vt_dataTaskWithRequest:request
-               completionHandler:completionHandler];
-}
+    SEL sel = NSSelectorFromString(@"getNewVoiceServerList:");
 
-@end
+    Method method = class_getInstanceMethod(cls, sel);
 
-#pragma mark - Download
-
-@interface NSURLSession (VoiceTraceDownload)
-
-- (NSURLSessionDownloadTask *)
-vt_downloadTaskWithRequest:(NSURLRequest *)request
-completionHandler:(void (^)(NSURL *,
-                            NSURLResponse *,
-                            NSError *))completionHandler;
-
-@end
-
-@implementation NSURLSession (VoiceTraceDownload)
-
-- (NSURLSessionDownloadTask *)
-vt_downloadTaskWithRequest:(NSURLRequest *)request
-completionHandler:(void (^)(NSURL *,
-                            NSURLResponse *,
-                            NSError *))completionHandler {
-
-    NSString *url =
-    request.URL.absoluteString ?: @"";
-
-    VTWrite([NSString stringWithFormat:
-             @"[DOWNLOAD] %@", url]);
-
-    if (VTIsInteresting(url)) {
-        VTWrite(@"[INTERESTING DOWNLOAD]");
-        VTShowURL(url);
+    if (!method) {
+        NSLog(@"[VoiceRebuild] getNewVoiceServerList: not found");
+        return;
     }
 
-    return
-    [self vt_downloadTaskWithRequest:request
-                   completionHandler:completionHandler];
-}
+    IMP oldIMP = method_getImplementation(method);
 
-@end
+    typedef void (*VoiceFunc)(id, SEL, id);
 
-#pragma mark - Hook
+    VoiceFunc original = (VoiceFunc)oldIMP;
 
-static void VTHook(Class cls,
-                   SEL original,
-                   SEL replacement) {
+    IMP newIMP = imp_implementationWithBlock(^void(id self, id arg) {
 
-    Method a =
-    class_getInstanceMethod(cls, original);
+        NSLog(@"[VoiceRebuild] ===== HB VOICE SERVER =====");
+        NSLog(@"[VoiceRebuild] argument = %@", arg);
 
-    Method b =
-    class_getInstanceMethod(cls, replacement);
+        NSString *info =
+        [NSString stringWithFormat:
+         @"方法：getNewVoiceServerList:\n\n参数：\n%@",
+         arg];
 
-    if (a && b) {
-        method_exchangeImplementations(a, b);
-    }
+        HBShow(info);
+
+        original(self, sel, arg);
+    });
+
+    method_setImplementation(method, newIMP);
+
+    NSLog(@"[VoiceRebuild] Hook installed!");
 }
 
 __attribute__((constructor))
-static void VoiceTraceLoaded(void) {
+static void VoiceRebuildInjectTest_Loaded(void) {
 
     @autoreleasepool {
 
-        VTWrite(@"======================");
-        VTWrite(@"VoiceTrace LOADED");
-        VTWrite(@"======================");
+        NSLog(@"[VoiceRebuild] loaded");
 
-        VTHook(
-            [NSURLSession class],
-            @selector(dataTaskWithRequest:completionHandler:),
-            @selector(vt_dataTaskWithRequest:completionHandler:)
+        dispatch_after(
+            dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC),
+            dispatch_get_main_queue(),
+            ^{
+                HookVoiceController();
+            }
         );
-
-        VTHook(
-            [NSURLSession class],
-            @selector(downloadTaskWithRequest:completionHandler:),
-            @selector(vt_downloadTaskWithRequest:completionHandler:)
-        );
-
-        VTWrite(@"VoiceTrace READY");
     }
 }
