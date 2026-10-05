@@ -13,13 +13,10 @@ static void HBWriteLog(NSString *format, ...)
     va_end(args);
 
     NSString *path =
-        [NSHomeDirectory()
-         stringByAppendingPathComponent:
-         @"Documents/HBInjectTest.log"];
+        [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/HBInjectTest.log"];
 
     NSString *line =
-        [NSString stringWithFormat:
-         @"[%@] %@\n",
+        [NSString stringWithFormat:@"[%@] %@\n",
          [NSDate date],
          message];
 
@@ -29,8 +26,7 @@ static void HBWriteLog(NSString *format, ...)
     if (file)
     {
         [file seekToEndOfFile];
-        [file writeData:
-         [line dataUsingEncoding:NSUTF8StringEncoding]];
+        [file writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
         [file closeFile];
     }
     else
@@ -48,24 +44,20 @@ static void HBScanViewControllers(void)
 {
     HBWriteLog(@"========================================");
     HBWriteLog(@"START VIEW CONTROLLER SCAN");
+    HBWriteLog(@"THIS IS THE NEW SCANNER");
 
     int count = objc_getClassList(NULL, 0);
 
+    HBWriteLog(@"Objective-C class count = %d", count);
+
     if (count <= 0)
-    {
-        HBWriteLog(@"No Objective-C classes found");
         return;
-    }
 
     Class *classes =
-        (__unsafe_unretained Class *)
-        malloc(sizeof(Class) * count);
+        (__unsafe_unretained Class *)malloc(sizeof(Class) * count);
 
     int actualCount =
         objc_getClassList(classes, count);
-
-    Class viewControllerClass =
-        [UIViewController class];
 
     for (int i = 0; i < actualCount; i++)
     {
@@ -74,51 +66,35 @@ static void HBScanViewControllers(void)
         if (!cls)
             continue;
 
-        NSString *name =
-            NSStringFromClass(cls);
+        NSString *name = NSStringFromClass(cls);
 
         if (!name)
             continue;
 
         BOOL nameMatched =
             [name rangeOfString:@"Setting"
-                         options:NSCaseInsensitiveSearch].location
-                != NSNotFound
-            ||
+                         options:NSCaseInsensitiveSearch].location != NSNotFound ||
             [name rangeOfString:@"More"
-                         options:NSCaseInsensitiveSearch].location
-                != NSNotFound
-            ||
+                         options:NSCaseInsensitiveSearch].location != NSNotFound ||
             [name rangeOfString:@"Profile"
-                         options:NSCaseInsensitiveSearch].location
-                != NSNotFound
-            ||
+                         options:NSCaseInsensitiveSearch].location != NSNotFound ||
             [name rangeOfString:@"Config"
-                         options:NSCaseInsensitiveSearch].location
-                != NSNotFound;
+                         options:NSCaseInsensitiveSearch].location != NSNotFound;
 
         if (!nameMatched)
             continue;
 
-        /*
-         * 只保留 UIViewController 子类
-         */
-        if (![cls isSubclassOfClass:viewControllerClass])
+        if (![cls isSubclassOfClass:[UIViewController class]])
             continue;
 
-        Class superClass =
-            class_getSuperclass(cls);
+        Class superClass = class_getSuperclass(cls);
 
         NSString *superName =
-            superClass
-            ? NSStringFromClass(superClass)
-            : @"<none>";
+            superClass ? NSStringFromClass(superClass) : @"<none>";
 
-        HBWriteLog(
-            @"CONTROLLER: %@ | SUPER: %@",
-            name,
-            superName
-        );
+        HBWriteLog(@"CONTROLLER: %@ | SUPER: %@",
+                   name,
+                   superName);
     }
 
     free(classes);
@@ -134,28 +110,18 @@ static void HBInjectTestInit(void)
     {
         HBWriteLog(@"========================================");
         HBWriteLog(@"INJECT TEST START");
-
-        HBWriteLog(
-            @"PID = %d",
-            getpid()
-        );
-
-        HBWriteLog(
-            @"PROCESS = %@",
-            [[NSProcessInfo processInfo] processName]
-        );
-
+        HBWriteLog(@"NEW VERSION 2026-10-05-NEW-SCANNER");
+        HBWriteLog(@"PID = %d", getpid());
+        HBWriteLog(@"PROCESS = %@",
+                   [[NSProcessInfo processInfo] processName]);
         HBWriteLog(@"========================================");
 
         dispatch_after(
-            dispatch_time(
-                DISPATCH_TIME_NOW,
-                (int64_t)(5 * NSEC_PER_SEC)
-            ),
+            dispatch_time(DISPATCH_TIME_NOW,
+                          (int64_t)(5 * NSEC_PER_SEC)),
             dispatch_get_main_queue(),
             ^{
                 HBScanViewControllers();
-            }
-        );
+            });
     }
 }
