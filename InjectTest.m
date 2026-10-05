@@ -3,134 +3,143 @@
 #import <objc/runtime.h>
 
 static NSString *HBLogPath(void) {
-    NSArray *paths = NSSearchPathForDirectoriesInDomains(
-        NSDocumentDirectory,
-        NSUserDomainMask,
-        YES
-    );
-    NSString *documents = paths.firstObject;
-    return [documents stringByAppendingPathComponent:@"HBCallTrace.log"];
+    NSArray *paths =
+        NSSearchPathForDirectoriesInDomains(
+            NSDocumentDirectory,
+            NSUserDomainMask,
+            YES
+        );
+
+    return [paths.firstObject
+            stringByAppendingPathComponent:@"HBCallTrace.log"];
 }
 
 static void HBLog(NSString *format, ...) {
     va_list args;
     va_start(args, format);
 
-    NSString *msg = [[NSString alloc] initWithFormat:format arguments:args];
+    NSString *msg =
+        [[NSString alloc] initWithFormat:format
+                            arguments:args];
 
     va_end(args);
 
-    NSString *line = [NSString stringWithFormat:
-                      @"[%@] %@\n",
-                      [NSDate date],
-                      msg];
+    NSString *line =
+        [NSString stringWithFormat:@"[%@] %@\n",
+         [NSDate date], msg];
+
+    NSString *path = HBLogPath();
 
     NSFileHandle *fh =
-        [NSFileHandle fileHandleForWritingAtPath:HBLogPath()];
+        [NSFileHandle fileHandleForWritingAtPath:path];
 
     if (!fh) {
         [[NSFileManager defaultManager]
-            createFileAtPath:HBLogPath()
+            createFileAtPath:path
             contents:nil
             attributes:nil];
 
-        fh = [NSFileHandle fileHandleForWritingAtPath:HBLogPath()];
+        fh =
+            [NSFileHandle fileHandleForWritingAtPath:path];
     }
 
     [fh seekToEndOfFile];
-    [fh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
+    [fh writeData:
+        [line dataUsingEncoding:NSUTF8StringEncoding]];
     [fh closeFile];
 
     NSLog(@"%@", msg);
 }
 
-#pragma mark - GetNewVoiceServerList
+static void HBLogStack(void) {
 
-static void HB_getNewVoiceServerList(id self, SEL _cmd, id arg) {
+    NSArray *stack =
+        [NSThread callStackSymbols];
+
+    HBLog(@"========== CALL STACK ==========");
+
+    NSUInteger count = MIN(stack.count, (NSUInteger)15);
+
+    for (NSUInteger i = 0; i < count; i++) {
+        HBLog(@"STACK[%lu] %@",
+              (unsigned long)i,
+              stack[i]);
+    }
+
+    HBLog(@"========== END STACK ==========");
+}
+
+#pragma mark -
+#pragma mark Original IMP
+
+static void (*HBOriginalGetReVoice)(id, SEL);
+
+static void (*HBOriginalGetNewVoiceServerList)(
+    id,
+    SEL,
+    id
+);
+
+#pragma mark -
+#pragma mark GetReVoice
+
+static void HB_GetReVoice(id self, SEL _cmd) {
+
+    HBLog(@"========================================");
+    HBLog(@"CALL GetReVoice");
+    HBLog(@"self = %@", self);
+
+    HBLogStack();
+
+    HBLog(@"---- CALL ORIGINAL GetReVoice ----");
+
+    if (HBOriginalGetReVoice) {
+        HBOriginalGetReVoice(
+            self,
+            _cmd
+        );
+    }
+
+    HBLog(@"---- RETURN ORIGINAL GetReVoice ----");
+}
+
+#pragma mark -
+#pragma mark getNewVoiceServerList:
+
+static void HB_getNewVoiceServerList(
+    id self,
+    SEL _cmd,
+    id arg
+) {
+
     HBLog(@"========================================");
     HBLog(@"CALL getNewVoiceServerList:");
     HBLog(@"self = %@", self);
     HBLog(@"arg class = %@", [arg class]);
     HBLog(@"arg = %@", arg);
 
-    // 不改变原逻辑：
-    // 这里暂时不调用原 IMP，只用于确认是否会触发。
-    HBLog(@"getNewVoiceServerList: 被调用");
-}
+    HBLogStack();
 
-#pragma mark - GetVoiceServerList
+    HBLog(@"---- CALL ORIGINAL getNewVoiceServerList: ----");
 
-static id HB_GetVoiceServerList(id self, SEL _cmd) {
-    HBLog(@"========================================");
-    HBLog(@"CALL GetVoiceServerList");
-    HBLog(@"self = %@", self);
-
-    HBLog(@"GetVoiceServerList 被调用");
-
-    return nil;
-}
-
-#pragma mark - GetReVoice
-
-static void HB_GetReVoice(id self, SEL _cmd) {
-    HBLog(@"========================================");
-    HBLog(@"CALL GetReVoice");
-    HBLog(@"self = %@", self);
-
-    HBLog(@"GetReVoice 被调用");
-}
-
-#pragma mark - getVoiceSelectKey:
-
-static void HB_getVoiceSelectKey(id self, SEL _cmd, id arg) {
-    HBLog(@"========================================");
-    HBLog(@"CALL getVoiceSelectKey:");
-    HBLog(@"arg class = %@", [arg class]);
-    HBLog(@"arg = %@", arg);
-
-    HBLog(@"getVoiceSelectKey: 被调用");
-}
-
-#pragma mark - parseVoiceData:forType:completion:
-
-static void HB_parseVoiceData(
-    id self,
-    SEL _cmd,
-    id data,
-    id type,
-    id completion
-) {
-    HBLog(@"========================================");
-    HBLog(@"CALL parseVoiceData:forType:completion:");
-    HBLog(@"data class = %@", [data class]);
-    HBLog(@"data = %@", data);
-    HBLog(@"type class = %@", [type class]);
-    HBLog(@"type = %@", type);
-    HBLog(@"completion class = %@", [completion class]);
-
-    if ([data isKindOfClass:[NSData class]]) {
-        NSData *d = data;
-
-        HBLog(@"NSData length = %lu",
-              (unsigned long)d.length);
-
-        NSString *text =
-            [[NSString alloc] initWithData:d
-                                  encoding:NSUTF8StringEncoding];
-
-        if (text) {
-            HBLog(@"NSData UTF8 = %@", text);
-        }
+    if (HBOriginalGetNewVoiceServerList) {
+        HBOriginalGetNewVoiceServerList(
+            self,
+            _cmd,
+            arg
+        );
     }
 
-    HBLog(@"parseVoiceData: 被调用");
+    HBLog(@"---- RETURN ORIGINAL getNewVoiceServerList: ----");
 }
 
-#pragma mark - Scan
+#pragma mark -
+#pragma mark Install
 
 static void HBInstallTrace(void) {
 
-    Class cls = NSClassFromString(@"VoiceSelectController");
+    Class cls =
+        NSClassFromString(@"VoiceSelectController");
 
     if (!cls) {
         HBLog(@"VoiceSelectController NOT FOUND");
@@ -140,99 +149,76 @@ static void HBInstallTrace(void) {
     HBLog(@"VoiceSelectController FOUND");
 
     /*
-     * 注意：
-     * 当前版本只是替换 IMP 来观察调用。
-     * 这意味着这些方法如果被调用，原方法逻辑不会执行。
-     *
-     * 这是故意的诊断步骤。
+     * GetReVoice
      */
 
-    Method m;
-
-    m = class_getInstanceMethod(
-        cls,
-        @selector(getNewVoiceServerList:)
-    );
-
-    if (m) {
-        method_setImplementation(
-            m,
-            (IMP)HB_getNewVoiceServerList
+    Method method =
+        class_getInstanceMethod(
+            cls,
+            @selector(GetReVoice)
         );
 
-        HBLog(@"HOOKED getNewVoiceServerList:");
-    }
+    if (method) {
 
-    m = class_getInstanceMethod(
-        cls,
-        @selector(GetVoiceServerList)
-    );
+        IMP original =
+            method_getImplementation(method);
 
-    if (m) {
+        HBOriginalGetReVoice =
+            (void (*)(id, SEL))original;
+
         method_setImplementation(
-            m,
-            (IMP)HB_GetVoiceServerList
-        );
-
-        HBLog(@"HOOKED GetVoiceServerList");
-    }
-
-    m = class_getInstanceMethod(
-        cls,
-        @selector(GetReVoice)
-    );
-
-    if (m) {
-        method_setImplementation(
-            m,
+            method,
             (IMP)HB_GetReVoice
         );
 
         HBLog(@"HOOKED GetReVoice");
+        HBLog(@"ORIGINAL IMP = %p",
+              original);
     }
 
-    m = class_getInstanceMethod(
-        cls,
-        @selector(getVoiceSelectKey:)
-    );
+    /*
+     * getNewVoiceServerList:
+     */
 
-    if (m) {
-        method_setImplementation(
-            m,
-            (IMP)HB_getVoiceSelectKey
+    method =
+        class_getInstanceMethod(
+            cls,
+            @selector(getNewVoiceServerList:)
         );
 
-        HBLog(@"HOOKED getVoiceSelectKey:");
-    }
+    if (method) {
 
-    m = class_getInstanceMethod(
-        cls,
-        @selector(parseVoiceData:forType:completion:)
-    );
+        IMP original =
+            method_getImplementation(method);
 
-    if (m) {
+        HBOriginalGetNewVoiceServerList =
+            (void (*)(id, SEL, id))original;
+
         method_setImplementation(
-            m,
-            (IMP)HB_parseVoiceData
+            method,
+            (IMP)HB_getNewVoiceServerList
         );
 
-        HBLog(@"HOOKED parseVoiceData:forType:completion:");
+        HBLog(@"HOOKED getNewVoiceServerList:");
+        HBLog(@"ORIGINAL IMP = %p",
+              original);
     }
 
     HBLog(@"========================================");
     HBLog(@"TRACE INSTALL FINISHED");
 }
 
+#pragma mark -
+#pragma mark Constructor
+
 __attribute__((constructor))
 static void HBInit(void) {
 
     HBLog(@"========================================");
-    HBLog(@"HB CALL TRACE LOADED");
-    HBLog(@"PROCESS = %@", [[NSProcessInfo processInfo] processName]);
+    HBLog(@"HB CALL TRACE V2 LOADED");
+    HBLog(@"PROCESS = %@",
+          [[NSProcessInfo processInfo] processName]);
 
-    /*
-     * 延迟一点，确保微信相关类已经加载。
-     */
     dispatch_after(
         dispatch_time(
             DISPATCH_TIME_NOW,
@@ -240,7 +226,6 @@ static void HBInit(void) {
         ),
         dispatch_get_main_queue(),
         ^{
-            HBLog(@"START INSTALL TRACE");
             HBInstallTrace();
         }
     );
