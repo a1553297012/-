@@ -2,8 +2,6 @@
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 
-#pragma mark - 日志
-
 static void HBWriteLog(NSString *format, ...)
 {
     va_list args;
@@ -31,11 +29,8 @@ static void HBWriteLog(NSString *format, ...)
     if (file)
     {
         [file seekToEndOfFile];
-
         [file writeData:
-         [line dataUsingEncoding:
-          NSUTF8StringEncoding]];
-
+         [line dataUsingEncoding:NSUTF8StringEncoding]];
         [file closeFile];
     }
     else
@@ -49,18 +44,16 @@ static void HBWriteLog(NSString *format, ...)
     NSLog(@"[HBInjectTest] %@", message);
 }
 
-#pragma mark - 扫描设置相关 Class
-
-static void HBScanSettingClasses(void)
+static void HBScanViewControllers(void)
 {
     HBWriteLog(@"========================================");
-    HBWriteLog(@"START SETTING CLASS SCAN");
+    HBWriteLog(@"START VIEW CONTROLLER SCAN");
 
     int count = objc_getClassList(NULL, 0);
 
     if (count <= 0)
     {
-        HBWriteLog(@"objc_getClassList returned 0");
+        HBWriteLog(@"No Objective-C classes found");
         return;
     }
 
@@ -71,7 +64,8 @@ static void HBScanSettingClasses(void)
     int actualCount =
         objc_getClassList(classes, count);
 
-    HBWriteLog(@"Total classes = %d", actualCount);
+    Class viewControllerClass =
+        [UIViewController class];
 
     for (int i = 0; i < actualCount; i++)
     {
@@ -86,7 +80,7 @@ static void HBScanSettingClasses(void)
         if (!name)
             continue;
 
-        BOOL matched =
+        BOOL nameMatched =
             [name rangeOfString:@"Setting"
                          options:NSCaseInsensitiveSearch].location
                 != NSNotFound
@@ -95,19 +89,21 @@ static void HBScanSettingClasses(void)
                          options:NSCaseInsensitiveSearch].location
                 != NSNotFound
             ||
-            [name rangeOfString:@"Config"
-                         options:NSCaseInsensitiveSearch].location
-                != NSNotFound
-            ||
             [name rangeOfString:@"Profile"
                          options:NSCaseInsensitiveSearch].location
                 != NSNotFound
             ||
-            [name rangeOfString:@"Account"
+            [name rangeOfString:@"Config"
                          options:NSCaseInsensitiveSearch].location
                 != NSNotFound;
 
-        if (!matched)
+        if (!nameMatched)
+            continue;
+
+        /*
+         * 只保留 UIViewController 子类
+         */
+        if (![cls isSubclassOfClass:viewControllerClass])
             continue;
 
         Class superClass =
@@ -119,7 +115,7 @@ static void HBScanSettingClasses(void)
             : @"<none>";
 
         HBWriteLog(
-            @"FOUND CLASS: %@ | SUPER: %@",
+            @"CONTROLLER: %@ | SUPER: %@",
             name,
             superName
         );
@@ -127,11 +123,9 @@ static void HBScanSettingClasses(void)
 
     free(classes);
 
-    HBWriteLog(@"END SETTING CLASS SCAN");
+    HBWriteLog(@"END VIEW CONTROLLER SCAN");
     HBWriteLog(@"========================================");
 }
-
-#pragma mark - Constructor
 
 __attribute__((constructor))
 static void HBInjectTestInit(void)
@@ -139,29 +133,19 @@ static void HBInjectTestInit(void)
     @autoreleasepool
     {
         HBWriteLog(@"========================================");
-        HBWriteLog(@"INJECT TEST CONSTRUCTOR START");
-
-        HBWriteLog(@"InjectTest.m 已经被加载");
+        HBWriteLog(@"INJECT TEST START");
 
         HBWriteLog(
-            @"Process ID = %d",
+            @"PID = %d",
             getpid()
         );
 
         HBWriteLog(
-            @"Process name = %@",
+            @"PROCESS = %@",
             [[NSProcessInfo processInfo] processName]
         );
 
         HBWriteLog(@"========================================");
-
-        /*
-         * 延迟几秒。
-         *
-         * 目的：
-         * 等微信主程序完成初始化后，
-         * 再扫描 Objective-C Class。
-         */
 
         dispatch_after(
             dispatch_time(
@@ -170,7 +154,7 @@ static void HBInjectTestInit(void)
             ),
             dispatch_get_main_queue(),
             ^{
-                HBScanSettingClasses();
+                HBScanViewControllers();
             }
         );
     }
