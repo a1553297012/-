@@ -41,19 +41,19 @@ static void HBWriteLog(NSString *text) {
 
         if (![fm fileExistsAtPath:path]) {
 
-            NSError *error = nil;
+            NSError *createError = nil;
 
             BOOL created =
                 [@"" writeToFile:path
                        atomically:YES
                          encoding:NSUTF8StringEncoding
-                            error:&error];
+                            error:&createError];
 
             if (!created) {
 
                 NSLog(
                     @"[VoiceRebuild] 创建日志失败: %@",
-                    error
+                    createError
                 );
 
                 return;
@@ -66,7 +66,7 @@ static void HBWriteLog(NSString *text) {
         if (!handle) {
 
             NSLog(
-                @"[VoiceRebuild] 无法打开日志: %@",
+                @"[VoiceRebuild] 打开日志失败: %@",
                 path
             );
 
@@ -100,71 +100,187 @@ static void HBWriteLog(NSString *text) {
     }
 }
 
-#pragma mark - Object Logger
+#pragma mark - Alert Logger
 
-static void HBLogObject(id obj, NSString *name) {
+static void HBLogAlert(
+    UIAlertController *alert,
+    NSString *prefix
+) {
 
-    if (!obj) {
+    if (!alert) {
 
         HBWriteLog(
             [NSString stringWithFormat:
                 @"%@ = nil",
-                name]
+                prefix]
         );
 
         return;
     }
 
     HBWriteLog(
-        [NSString stringWithFormat:
-            @"%@ class = %@",
-            name,
-            NSStringFromClass([obj class])]
+        @"----------------------------------------"
     );
 
     HBWriteLog(
         [NSString stringWithFormat:
-            @"%@ description = %@",
-            name,
-            obj]
+            @"%@ class = %@",
+            prefix,
+            NSStringFromClass([alert class])]
     );
 
-    if ([obj isKindOfClass:[UIAlertController class]]) {
+    HBWriteLog(
+        [NSString stringWithFormat:
+            @"%@ address = %p",
+            prefix,
+            alert]
+    );
 
-        UIAlertController *alert =
-            (UIAlertController *)obj;
+    HBWriteLog(
+        [NSString stringWithFormat:
+            @"%@ title = %@",
+            prefix,
+            alert.title]
+    );
+
+    HBWriteLog(
+        [NSString stringWithFormat:
+            @"%@ message = %@",
+            prefix,
+            alert.message]
+    );
+
+    HBWriteLog(
+        [NSString stringWithFormat:
+            @"%@ preferredStyle = %ld",
+            prefix,
+            (long)alert.preferredStyle]
+    );
+
+    HBWriteLog(
+        [NSString stringWithFormat:
+            @"%@ actions count = %lu",
+            prefix,
+            (unsigned long)alert.actions.count]
+    );
+
+    NSUInteger index = 0;
+
+    for (UIAlertAction *action in alert.actions) {
 
         HBWriteLog(
             [NSString stringWithFormat:
-                @"%@ title = %@",
-                name,
-                alert.title]
+                @"%@ action[%lu] title = %@",
+                prefix,
+                (unsigned long)index,
+                action.title]
         );
 
         HBWriteLog(
             [NSString stringWithFormat:
-                @"%@ message = %@",
-                name,
-                alert.message]
+                @"%@ action[%lu] style = %ld",
+                prefix,
+                (unsigned long)index,
+                (long)action.style]
+        );
+
+        index++;
+    }
+
+    HBWriteLog(
+        @"----------------------------------------"
+    );
+}
+
+#pragma mark - Runtime Information
+
+static void HBLogClassInformation(Class cls) {
+
+    if (!cls) {
+        return;
+    }
+
+    HBWriteLog(
+        [NSString stringWithFormat:
+            @"TARGET CLASS = %@",
+            NSStringFromClass(cls)]
+    );
+
+    Class superClass =
+        class_getSuperclass(cls);
+
+    if (superClass) {
+
+        HBWriteLog(
+            [NSString stringWithFormat:
+                @"SUPER CLASS = %@",
+                NSStringFromClass(superClass)]
+        );
+    }
+
+    Method method =
+        class_getInstanceMethod(
+            cls,
+            @selector(getNewVoiceServerList:)
+        );
+
+    if (method) {
+
+        const char *encoding =
+            method_getTypeEncoding(method);
+
+        unsigned int argumentCount =
+            method_getNumberOfArguments(method);
+
+        HBWriteLog(
+            [NSString stringWithFormat:
+                @"METHOD TYPE ENCODING = %s",
+                encoding ? encoding : "(null)"]
         );
 
         HBWriteLog(
             [NSString stringWithFormat:
-                @"%@ actions = %lu",
-                name,
-                (unsigned long)alert.actions.count]
+                @"METHOD ARGUMENT COUNT = %u",
+                argumentCount]
+        );
+    }
+}
+
+#pragma mark - Stack Trace
+
+static void HBLogStackTrace(void) {
+
+    NSArray *stack =
+        [NSThread callStackSymbols];
+
+    HBWriteLog(
+        @"========== CALL STACK =========="
+    );
+
+    NSUInteger index = 0;
+
+    for (NSString *item in stack) {
+
+        HBWriteLog(
+            [NSString stringWithFormat:
+                @"STACK[%lu] %@",
+                (unsigned long)index,
+                item]
         );
 
-        for (UIAlertAction *action in alert.actions) {
+        index++;
 
-            HBWriteLog(
-                [NSString stringWithFormat:
-                    @"%@ action = %@",
-                    name,
-                    action.title]
-            );
+        /*
+         * 不需要把几百行全部记录下来。
+         */
+        if (index >= 20) {
+            break;
         }
     }
+
+    HBWriteLog(
+        @"========== END STACK =========="
+    );
 }
 
 #pragma mark - Hook
@@ -178,17 +294,27 @@ static void HBHookedGetNewVoiceServerList(
     @autoreleasepool {
 
         HBWriteLog(
-            @"========================================"
+            @""
         );
 
         HBWriteLog(
-            @"getNewVoiceServerList: CALLED"
+            @"########################################"
+        );
+
+        HBWriteLog(
+            @"getNewVoiceServerList: ENTER"
         );
 
         HBWriteLog(
             [NSString stringWithFormat:
-                @"self = %@",
+                @"self class = %@",
                 NSStringFromClass([self class])]
+        );
+
+        HBWriteLog(
+            [NSString stringWithFormat:
+                @"self address = %p",
+                self]
         );
 
         HBWriteLog(
@@ -197,37 +323,120 @@ static void HBHookedGetNewVoiceServerList(
                 NSStringFromSelector(_cmd)]
         );
 
-        HBLogObject(
-            arg,
-            @"ARGUMENT"
-        );
+        /*
+         * 记录参数
+         */
+
+        if (arg) {
+
+            HBWriteLog(
+                [NSString stringWithFormat:
+                    @"ARGUMENT class = %@",
+                    NSStringFromClass([arg class])]
+            );
+
+            HBWriteLog(
+                [NSString stringWithFormat:
+                    @"ARGUMENT address = %p",
+                    arg]
+            );
+
+            HBWriteLog(
+                [NSString stringWithFormat:
+                    @"ARGUMENT description = %@",
+                    arg]
+            );
+
+        } else {
+
+            HBWriteLog(
+                @"ARGUMENT = nil"
+            );
+        }
 
         /*
-         * 关键测试：
+         * 如果参数是 UIAlertController，
+         * 详细记录它。
+         */
+
+        if ([arg isKindOfClass:
+                [UIAlertController class]]) {
+
+            HBLogAlert(
+                (UIAlertController *)arg,
+                @"ARGUMENT ALERT BEFORE"
+            );
+        }
+
+        /*
+         * 记录调用栈
+         */
+
+        HBLogStackTrace();
+
+        /*
+         * ====================================
+         * 关键部分
+         * ====================================
          *
-         * 这里暂时不调用原方法。
+         * 这一次恢复调用原始方法。
          *
-         * 如果这样微信不再卡死，
-         * 就可以确定问题出在：
+         * 所以不会像上一版一样卡在：
          *
-         * HBOriginalGetNewVoiceServerList(...)
+         *     正在获取...
          *
-         * 这一行。
          */
 
         HBWriteLog(
-            @"TEST MODE: original method NOT called"
+            @"CALLING ORIGINAL METHOD"
+        );
+
+        if (HBOriginalGetNewVoiceServerList) {
+
+            HBOriginalGetNewVoiceServerList(
+                self,
+                _cmd,
+                arg
+            );
+
+            HBWriteLog(
+                @"ORIGINAL METHOD RETURNED"
+            );
+
+        } else {
+
+            HBWriteLog(
+                @"ERROR: ORIGINAL IMP IS NULL"
+            );
+        }
+
+        /*
+         * 原方法返回以后，再记录一次参数。
+         *
+         * 如果 UIAlertController 内容发生变化，
+         * 这里可以看到。
+         */
+
+        if ([arg isKindOfClass:
+                [UIAlertController class]]) {
+
+            HBLogAlert(
+                (UIAlertController *)arg,
+                @"ARGUMENT ALERT AFTER"
+            );
+        }
+
+        HBWriteLog(
+            @"getNewVoiceServerList: EXIT"
         );
 
         HBWriteLog(
-            @"getNewVoiceServerList: RETURN"
+            @"########################################"
         );
 
         HBWriteLog(
-            @"========================================"
+            @""
         );
-
-        return;
     }
 }
 
@@ -259,10 +468,10 @@ static void HookVoiceController(void) {
     }
 
     HBWriteLog(
-        [NSString stringWithFormat:
-            @"VoiceSelectController FOUND: %@",
-            cls]
+        @"VoiceSelectController FOUND"
     );
+
+    HBLogClassInformation(cls);
 
     SEL selector =
         NSSelectorFromString(
@@ -288,12 +497,17 @@ static void HookVoiceController(void) {
         @"getNewVoiceServerList: FOUND"
     );
 
-    /*
-     * 输出 Objective-C 方法签名
-     */
+    const char *typeEncoding =
+        method_getTypeEncoding(method);
 
     unsigned int argumentCount =
         method_getNumberOfArguments(method);
+
+    HBWriteLog(
+        [NSString stringWithFormat:
+            @"type encoding = %s",
+            typeEncoding ? typeEncoding : "(null)"]
+    );
 
     HBWriteLog(
         [NSString stringWithFormat:
@@ -301,36 +515,26 @@ static void HookVoiceController(void) {
             argumentCount]
     );
 
-    const char *typeEncoding =
-        method_getTypeEncoding(method);
-
-    if (typeEncoding) {
-
-        HBWriteLog(
-            [NSString stringWithFormat:
-                @"type encoding = %s",
-                typeEncoding]
-        );
-    }
-
     /*
-     * 正常的：
+     * 当前我们已经验证过这个 Hook 能正常进入。
      *
-     * self
-     * _cmd
-     * arg
+     * 正常 Objective-C：
      *
-     * 一共应该是 3 个参数。
+     * 0 = self
+     * 1 = _cmd
+     * 2 = arg
+     *
+     * 所以这里应该是 3。
      */
 
     if (argumentCount != 3) {
 
         HBWriteLog(
-            @"WARNING: argument count is NOT 3"
+            @"WARNING: unexpected argument count"
         );
 
         HBWriteLog(
-            @"Hook aborted for safety"
+            @"Hook aborted"
         );
 
         return;
@@ -342,7 +546,7 @@ static void HookVoiceController(void) {
     if (!oldIMP) {
 
         HBWriteLog(
-            @"old IMP = NULL"
+            @"ERROR: old IMP is NULL"
         );
 
         return;
@@ -373,7 +577,7 @@ static void HookVoiceController(void) {
     HBWriteLog(
         [NSString stringWithFormat:
             @"class = %@",
-            cls]
+            NSStringFromClass(cls)]
     );
 
     HBWriteLog(
@@ -384,7 +588,7 @@ static void HookVoiceController(void) {
 
     HBWriteLog(
         [NSString stringWithFormat:
-            @"type encoding = %s",
+            @"encoding = %s",
             typeEncoding ? typeEncoding : "(null)"]
     );
 
@@ -402,15 +606,11 @@ static void StartVoiceHook(void) {
     );
 
     HBWriteLog(
-        @"VoiceRebuild dylib LOADED"
+        @"VoiceRebuildInjectTest LOADED"
     );
 
     HBWriteLog(
-        @"TEST VERSION"
-    );
-
-    HBWriteLog(
-        @"NO DEBUG WINDOW"
+        @"NORMAL MODE"
     );
 
     HBWriteLog(
@@ -418,8 +618,12 @@ static void StartVoiceHook(void) {
     );
 
     HBWriteLog(
+        @"ORIGINAL METHOD WILL RUN"
+    );
+
+    HBWriteLog(
         [NSString stringWithFormat:
-            @"log path = %@",
+            @"LOG PATH = %@",
             HBLogPath()]
     );
 
@@ -436,15 +640,10 @@ static void StartVoiceHook(void) {
         ^{
 
             HBWriteLog(
-                @"5 seconds elapsed"
+                @"First hook attempt"
             );
 
             HookVoiceController();
-
-            /*
-             * 如果第一次没找到，
-             * 再等 5 秒。
-             */
 
             if (!HBHookInstalled) {
 
