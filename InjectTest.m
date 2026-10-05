@@ -3,9 +3,10 @@
 __attribute__((constructor))
 static void TestLoaded(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
+
         UIAlertController *alert =
         [UIAlertController alertControllerWithTitle:@"测试成功"
-                                            message:@"VoiceRebuildInjectTest 已加载到微信"
+                                            message:@"VoiceRebuildInjectTest 已加载"
                                      preferredStyle:UIAlertControllerStyleAlert];
 
         [alert addAction:
@@ -13,27 +14,8 @@ static void TestLoaded(void) {
                                   style:UIAlertActionStyleDefault
                                 handler:nil]];
 
-        UIWindow *window = nil;
-
-        for (UIScene *scene in
-             [UIApplication sharedApplication].connectedScenes) {
-
-            if (scene.activationState ==
-                UISceneActivationStateForegroundActive &&
-                [scene isKindOfClass:[UIWindowScene class]]) {
-
-                for (UIWindow *w in
-                     ((UIWindowScene *)scene).windows) {
-
-                    if (w.isKeyWindow) {
-                        window = w;
-                        break;
-                    }
-                }
-            }
-
-            if (window) break;
-        }
+        UIWindow *window =
+        [UIApplication sharedApplication].keyWindow;
 
         UIViewController *vc = window.rootViewController;
 
@@ -41,8 +23,10 @@ static void TestLoaded(void) {
             vc = vc.presentedViewController;
         }
 
-        [vc presentViewController:alert
-                          animated:YES
-                        completion:nil];
+        if (vc) {
+            [vc presentViewController:alert
+                              animated:YES
+                            completion:nil];
+        }
     });
 }
