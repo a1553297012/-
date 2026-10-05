@@ -1,545 +1,313 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
-#import <AVFoundation/AVFoundation.h>
 #import <objc/message.h>
-#import <objc/runtime.h>
+#import <mach-o/dyld.h>
 
-@interface VR052VC : UIViewController
-@property(nonatomic,strong) UILabel *status;
-@property(nonatomic,strong) UIButton *record;
-@property(nonatomic,strong) UIButton *convert;
-@property(nonatomic,strong) UIButton *play;
-@property(nonatomic,strong) AVAudioRecorder *recorder;
-@property(nonatomic,strong) AVAudioPlayer *player;
-@property(nonatomic,strong) NSURL *recordURL;
-@property(nonatomic,strong) NSURL *convertedURL;
-@property(nonatomic,strong) NSString *toneID;
-@property(nonatomic,strong) NSArray *tones;
+@interface VR053VC : UIViewController
+@property(nonatomic,strong) UITextView *textView;
+@property(nonatomic,strong) NSTimer *timer;
+@property(nonatomic,assign) NSInteger count;
 @end
 
-@implementation VR052VC
+@implementation VR053VC
 
 - (void)viewDidLoad {
     [super viewDidLoad];
 
-    self.view.backgroundColor = UIColor.whiteColor;
-    self.title = @"微信语音变声 V0.5.2";
+    self.view.backgroundColor = [UIColor whiteColor];
+    self.title = @"V0.5.3 模型诊断";
 
-    UIScrollView *scroll =
-        [[UIScrollView alloc] initWithFrame:self.view.bounds];
-
-    scroll.autoresizingMask =
-        UIViewAutoresizingFlexibleWidth |
-        UIViewAutoresizingFlexibleHeight;
-
-    [self.view addSubview:scroll];
-
-    UIView *content = [[UIView alloc] init];
-    content.translatesAutoresizingMaskIntoConstraints = NO;
-    [scroll addSubview:content];
+    self.textView = [[UITextView alloc] initWithFrame:CGRectZero];
+    self.textView.translatesAutoresizingMaskIntoConstraints = NO;
+    self.textView.editable = NO;
+    self.textView.font = [UIFont systemFontOfSize:14];
+    [self.view addSubview:self.textView];
 
     [NSLayoutConstraint activateConstraints:@[
-        [content.topAnchor constraintEqualToAnchor:scroll.topAnchor],
-        [content.bottomAnchor constraintEqualToAnchor:scroll.bottomAnchor],
-        [content.leadingAnchor constraintEqualToAnchor:scroll.leadingAnchor],
-        [content.trailingAnchor constraintEqualToAnchor:scroll.trailingAnchor],
-        [content.widthAnchor constraintEqualToAnchor:scroll.widthAnchor]
+        [self.textView.topAnchor constraintEqualToAnchor:
+         self.view.safeAreaLayoutGuide.topAnchor constant:10],
+
+        [self.textView.bottomAnchor constraintEqualToAnchor:
+         self.view.bottomAnchor constant:-10],
+
+        [self.textView.leadingAnchor constraintEqualToAnchor:
+         self.view.leadingAnchor constant:10],
+
+        [self.textView.trailingAnchor constraintEqualToAnchor:
+         self.view.trailingAnchor constant:-10]
     ]];
 
-    UILabel *title = [[UILabel alloc] init];
-    title.text = @"微信语音变声";
-    title.font = [UIFont boldSystemFontOfSize:24];
-    title.translatesAutoresizingMaskIntoConstraints = NO;
-    [content addSubview:title];
+    [self refresh];
 
-    self.status = [[UILabel alloc] init];
-    self.status.text = @"正在读取 OpenVoice……";
-    self.status.numberOfLines = 0;
-    self.status.font = [UIFont systemFontOfSize:14];
-    self.status.translatesAutoresizingMaskIntoConstraints = NO;
-    [content addSubview:self.status];
+    self.timer =
+        [NSTimer scheduledTimerWithTimeInterval:1.0
+                                         target:self
+                                       selector:@selector(refresh)
+                                       userInfo:nil
+                                        repeats:YES];
+}
 
-    UILabel *toneTitle = [[UILabel alloc] init];
-    toneTitle.text = @"选择音色";
-    toneTitle.font = [UIFont boldSystemFontOfSize:18];
-    toneTitle.translatesAutoresizingMaskIntoConstraints = NO;
-    [content addSubview:toneTitle];
+- (void)dealloc {
+    [self.timer invalidate];
+}
 
-    UIStackView *tones =
-        [[UIStackView alloc] init];
+- (void)refresh {
 
-    tones.axis = UILayoutConstraintAxisVertical;
-    tones.spacing = 8;
-    tones.translatesAutoresizingMaskIntoConstraints = NO;
-    [content addSubview:tones];
+    self.count++;
+
+    NSMutableString *out =
+        [NSMutableString string];
+
+    [out appendString:@"V0.5.3 OpenVoice 模型诊断\n\n"];
 
     Class cls =
         NSClassFromString(@"SHVoiceReconstructionManager");
 
+    if (!cls) {
+
+        [out appendString:
+         @"❌ SHVoiceReconstructionManager 不存在\n"];
+
+        self.textView.text = out;
+        return;
+    }
+
+    [out appendString:
+     @"✅ SHVoiceReconstructionManager\n"];
+
+    SEL sharedSEL =
+        NSSelectorFromString(@"sharedManager");
+
     id manager = nil;
 
-    if (cls &&
-        [cls respondsToSelector:
-         NSSelectorFromString(@"sharedManager")]) {
+    if ([cls respondsToSelector:sharedSEL]) {
 
         manager =
             ((id (*)(id, SEL))objc_msgSend)(
                 cls,
-                NSSelectorFromString(@"sharedManager"));
+                sharedSEL
+            );
     }
 
     if (!manager) {
-        self.status.text =
-            @"❌ 找不到 OpenVoice 管理器";
-    } else {
 
-        BOOL ready = NO;
+        [out appendString:
+         @"❌ sharedManager 返回为空\n"];
 
-        if ([manager respondsToSelector:
-             NSSelectorFromString(@"modelReady")]) {
-
-            ready =
-                ((BOOL (*)(id, SEL))objc_msgSend)(
-                    manager,
-                    NSSelectorFromString(@"modelReady"));
-        }
-
-        if ([manager respondsToSelector:
-             NSSelectorFromString(@"tones")]) {
-
-            self.tones =
-                ((id (*)(id, SEL))objc_msgSend)(
-                    manager,
-                    NSSelectorFromString(@"tones"));
-        }
-
-        self.status.text =
-            [NSString stringWithFormat:
-             @"OpenVoice：%@\n检测到 %lu 个音色",
-             ready ? @"✅ 已就绪" : @"⚠️ 未就绪",
-             (unsigned long)self.tones.count];
-
-        for (id tone in self.tones) {
-
-            NSString *name = nil;
-            NSString *identifier = nil;
-
-            if ([tone respondsToSelector:
-                 NSSelectorFromString(@"name")]) {
-
-                name =
-                    ((id (*)(id, SEL))objc_msgSend)(
-                        tone,
-                        NSSelectorFromString(@"name"));
-            }
-
-            if ([tone respondsToSelector:
-                 NSSelectorFromString(@"identifier")]) {
-
-                identifier =
-                    ((id (*)(id, SEL))objc_msgSend)(
-                        tone,
-                        NSSelectorFromString(@"identifier"));
-            }
-
-            UIButton *b =
-                [UIButton buttonWithType:UIButtonTypeSystem];
-
-            [b setTitle:(name ?: identifier ?: @"未知音色")
-               forState:UIControlStateNormal];
-
-            b.contentHorizontalAlignment =
-                UIControlContentHorizontalAlignmentLeft;
-
-            b.contentEdgeInsets =
-                UIEdgeInsetsMake(10, 14, 10, 14);
-
-            b.layer.borderWidth = 1;
-            b.layer.cornerRadius = 8;
-            b.layer.borderColor =
-                UIColor.lightGrayColor.CGColor;
-
-            b.accessibilityIdentifier = identifier;
-
-            [b addTarget:self
-                  action:@selector(tone:)
-        forControlEvents:UIControlEventTouchUpInside];
-
-            [tones addArrangedSubview:b];
-        }
-    }
-
-    self.record = [self makeButton:@"🎙 录音"];
-    self.convert = [self makeButton:@"✨ OpenVoice 变声"];
-    self.play = [self makeButton:@"▶️ 试听"];
-
-    self.convert.enabled = NO;
-    self.play.enabled = NO;
-
-    [self.record addTarget:self
-                    action:@selector(recordPressed)
-          forControlEvents:UIControlEventTouchUpInside];
-
-    [self.convert addTarget:self
-                     action:@selector(convertPressed)
-           forControlEvents:UIControlEventTouchUpInside];
-
-    [self.play addTarget:self
-                  action:@selector(playPressed)
-        forControlEvents:UIControlEventTouchUpInside];
-
-    [content addSubview:self.record];
-    [content addSubview:self.convert];
-    [content addSubview:self.play];
-
-    [NSLayoutConstraint activateConstraints:@[
-        [title.topAnchor constraintEqualToAnchor:content.topAnchor constant:20],
-        [title.leadingAnchor constraintEqualToAnchor:content.leadingAnchor constant:20],
-
-        [self.status.topAnchor constraintEqualToAnchor:title.bottomAnchor constant:10],
-        [self.status.leadingAnchor constraintEqualToAnchor:title.leadingAnchor],
-        [self.status.trailingAnchor constraintEqualToAnchor:content.trailingAnchor constant:-20],
-
-        [toneTitle.topAnchor constraintEqualToAnchor:self.status.bottomAnchor constant:20],
-        [toneTitle.leadingAnchor constraintEqualToAnchor:title.leadingAnchor],
-
-        [tones.topAnchor constraintEqualToAnchor:toneTitle.bottomAnchor constant:8],
-        [tones.leadingAnchor constraintEqualToAnchor:title.leadingAnchor],
-        [tones.trailingAnchor constraintEqualToAnchor:content.trailingAnchor constant:-20],
-
-        [self.record.topAnchor constraintEqualToAnchor:tones.bottomAnchor constant:20],
-        [self.record.leadingAnchor constraintEqualToAnchor:title.leadingAnchor],
-        [self.record.trailingAnchor constraintEqualToAnchor:content.trailingAnchor constant:-20],
-        [self.record.heightAnchor constraintEqualToConstant:50],
-
-        [self.convert.topAnchor constraintEqualToAnchor:self.record.bottomAnchor constant:10],
-        [self.convert.leadingAnchor constraintEqualToAnchor:self.record.leadingAnchor],
-        [self.convert.trailingAnchor constraintEqualToAnchor:self.record.trailingAnchor],
-        [self.convert.heightAnchor constraintEqualToConstant:50],
-
-        [self.play.topAnchor constraintEqualToAnchor:self.convert.bottomAnchor constant:10],
-        [self.play.leadingAnchor constraintEqualToAnchor:self.record.leadingAnchor],
-        [self.play.trailingAnchor constraintEqualToAnchor:self.record.trailingAnchor],
-        [self.play.heightAnchor constraintEqualToConstant:50],
-
-        [self.play.bottomAnchor constraintEqualToAnchor:content.bottomAnchor constant:-30]
-    ]];
-}
-
-- (UIButton *)makeButton:(NSString *)title {
-    UIButton *b =
-        [UIButton buttonWithType:UIButtonTypeSystem];
-
-    [b setTitle:title forState:UIControlStateNormal];
-
-    b.titleLabel.font =
-        [UIFont boldSystemFontOfSize:17];
-
-    b.layer.cornerRadius = 10;
-    b.layer.borderWidth = 1;
-    b.layer.borderColor =
-        UIColor.lightGrayColor.CGColor;
-
-    b.translatesAutoresizingMaskIntoConstraints = NO;
-
-    return b;
-}
-
-- (void)tone:(UIButton *)button {
-
-    self.toneID = button.accessibilityIdentifier;
-
-    Class cls =
-        NSClassFromString(@"SHVoiceReconstructionManager");
-
-    id manager =
-        ((id (*)(id, SEL))objc_msgSend)(
-            cls,
-            NSSelectorFromString(@"sharedManager"));
-
-    if (self.toneID.length &&
-        [manager respondsToSelector:
-         NSSelectorFromString(@"selectToneWithIdentifier:")]) {
-
-        ((void (*)(id, SEL, id))objc_msgSend)(
-            manager,
-            NSSelectorFromString(@"selectToneWithIdentifier:"),
-            self.toneID);
-    }
-
-    self.status.text =
-        [NSString stringWithFormat:
-         @"已选择：%@",
-         button.currentTitle];
-
-    self.convert.enabled =
-        self.recordURL != nil;
-}
-
-- (NSURL *)recordURLPath {
-
-    NSString *p =
-        [NSTemporaryDirectory()
-         stringByAppendingPathComponent:@"vr052_input.wav"];
-
-    return [NSURL fileURLWithPath:p];
-}
-
-- (void)recordPressed {
-
-    if (self.recorder.isRecording) {
-
-        [self.recorder stop];
-
-        [self.record setTitle:@"🎙 重新录音"
-                      forState:UIControlStateNormal];
-
-        self.convert.enabled = YES;
-
-        self.status.text =
-            @"✅ 录音完成，可以开始变声";
-
+        self.textView.text = out;
         return;
     }
 
-    AVAudioSession *session =
-        [AVAudioSession sharedInstance];
+    [out appendString:@"✅ sharedManager\n\n"];
 
-    [session requestRecordPermission:^(BOOL granted) {
+    BOOL ready = NO;
 
-        dispatch_async(dispatch_get_main_queue(), ^{
+    SEL readySEL =
+        NSSelectorFromString(@"modelReady");
 
-            if (!granted) {
+    if ([manager respondsToSelector:readySEL]) {
 
-                self.status.text =
-                    @"❌ 没有麦克风权限";
-
-                return;
-            }
-
-            NSError *error = nil;
-
-            [session setCategory:
-                AVAudioSessionCategoryRecord
-                       error:&error];
-
-            [session setActive:YES error:&error];
-
-            self.recordURL =
-                [self recordURLPath];
-
-            NSDictionary *settings = @{
-                AVFormatIDKey : @(kAudioFormatLinearPCM),
-                AVSampleRateKey : @16000,
-                AVNumberOfChannelsKey : @1,
-                AVLinearPCMBitDepthKey : @16,
-                AVLinearPCMIsFloatKey : @NO,
-                AVLinearPCMIsBigEndianKey : @NO
-            };
-
-            self.recorder =
-                [[AVAudioRecorder alloc]
-                 initWithURL:self.recordURL
-                 settings:settings
-                 error:&error];
-
-            if (error) {
-
-                self.status.text =
-                    [NSString stringWithFormat:
-                     @"❌ 录音失败：%@",
-                     error.localizedDescription];
-
-                return;
-            }
-
-            [self.recorder prepareToRecord];
-            [self.recorder record];
-
-            self.convert.enabled = NO;
-            self.play.enabled = NO;
-
-            [self.record setTitle:@"⏹ 停止录音"
-                          forState:UIControlStateNormal];
-
-            self.status.text =
-                @"🔴 正在录音……";
-        });
-    }];
-}
-
-- (void)convertPressed {
-
-    if (!self.recordURL) {
-        self.status.text = @"❌ 请先录音";
-        return;
+        ready =
+            ((BOOL (*)(id, SEL))objc_msgSend)(
+                manager,
+                readySEL
+            );
     }
 
-    Class cls =
-        NSClassFromString(@"SHVoiceReconstructionManager");
+    [out appendFormat:
+     @"modelReady：%@\n",
+     ready ? @"✅ YES" : @"⚠️ NO"];
 
-    id manager =
-        ((id (*)(id, SEL))objc_msgSend)(
-            cls,
-            NSSelectorFromString(@"sharedManager"));
+    NSString *status = nil;
 
-    SEL selector =
-        NSSelectorFromString(
-            @"convertSourceAudioURL:progress:completion:");
+    SEL statusSEL =
+        NSSelectorFromString(@"modelStatusText");
 
-    if (![manager respondsToSelector:selector]) {
+    if ([manager respondsToSelector:statusSEL]) {
 
-        self.status.text =
-            @"❌ 没有找到转换接口";
-
-        return;
+        status =
+            ((id (*)(id, SEL))objc_msgSend)(
+                manager,
+                statusSEL
+            );
     }
 
-    self.convert.enabled = NO;
-    self.play.enabled = NO;
+    [out appendFormat:
+     @"modelStatusText：%@\n\n",
+     status.length ? status : @"(空)"];
 
-    self.status.text =
-        @"⏳ OpenVoice 正在转换……";
+    NSArray *tones = nil;
+
+    SEL tonesSEL =
+        NSSelectorFromString(@"tones");
+
+    if ([manager respondsToSelector:tonesSEL]) {
+
+        tones =
+            ((id (*)(id, SEL))objc_msgSend)(
+                manager,
+                tonesSEL
+            );
+    }
+
+    [out appendFormat:
+     @"音色数量：%lu\n\n",
+     (unsigned long)tones.count];
 
     /*
-     * progress 先传 nil。
-     * completion 使用两个对象参数接收：
-     * output / error
+     * 查找当前进程加载的 dylib。
      */
+    [out appendString:@"━━ dylib 路径 ━━\n"];
 
-    id completion =
-        ^(id output, NSError *error) {
+    uint32_t imageCount =
+        _dyld_image_count();
 
-            dispatch_async(
-                dispatch_get_main_queue(), ^{
+    for (uint32_t i = 0;
+         i < imageCount;
+         i++) {
 
-                if (error) {
+        const char *name =
+            _dyld_get_image_name(i);
 
-                    self.status.text =
-                        [NSString stringWithFormat:
-                         @"❌ 转换失败：%@",
-                         error.localizedDescription];
+        if (!name)
+            continue;
 
-                    self.convert.enabled = YES;
-                    return;
+        NSString *path =
+            [NSString stringWithUTF8String:name];
+
+        NSString *lower =
+            path.lowercaseString;
+
+        if ([lower containsString:@"hangt"] ||
+            [lower containsString:@"senhang"] ||
+            [lower containsString:@"openvoice"] ||
+            [lower containsString:@"voicerebuild"]) {
+
+            [out appendFormat:@"%@\n", path];
+        }
+    }
+
+    /*
+     * 检查常见模型资源名称。
+     */
+    [out appendString:@"\n━━ 模型资源扫描 ━━\n"];
+
+    NSArray *keywords = @[
+        @"OpenVoice",
+        @"openvoice",
+        @"SenHang",
+        @"senhang",
+        @"SpeakerEncoder",
+        @"VoiceConverter",
+        @".mlmodelc"
+    ];
+
+    NSFileManager *fm =
+        [NSFileManager defaultManager];
+
+    NSMutableSet *found =
+        [NSMutableSet set];
+
+    NSArray *roots = @[
+        [NSBundle mainBundle].bundlePath,
+        [NSBundle mainBundle].resourcePath,
+        NSTemporaryDirectory()
+    ];
+
+    for (NSString *root in roots) {
+
+        NSDirectoryEnumerator *enumerator =
+            [fm enumeratorAtPath:root];
+
+        NSString *relative = nil;
+
+        while ((relative = [enumerator nextObject])) {
+
+            NSString *full =
+                [root stringByAppendingPathComponent:relative];
+
+            NSString *lower =
+                full.lowercaseString;
+
+            BOOL match = NO;
+
+            for (NSString *key in keywords) {
+
+                if ([lower containsString:
+                     key.lowercaseString]) {
+
+                    match = YES;
+                    break;
                 }
+            }
 
-                NSURL *url = nil;
+            if (match) {
 
-                if ([output isKindOfClass:[NSURL class]]) {
-                    url = output;
-                } else if ([output isKindOfClass:[NSString class]]) {
-                    url = [NSURL fileURLWithPath:output];
+                if (![found containsObject:full]) {
+
+                    [found addObject:full];
+
+                    [out appendFormat:
+                     @"%@\n",
+                     full];
                 }
+            }
 
-                if (!url ||
-                    ![[NSFileManager defaultManager]
-                     fileExistsAtPath:url.path]) {
+            /*
+             * 防止扫描异常庞大的目录。
+             */
+            if (found.count >= 80)
+                break;
+        }
 
-                    self.status.text =
-                        [NSString stringWithFormat:
-                         @"⚠️ 转换返回：%@",
-                         output];
-
-                    self.convert.enabled = YES;
-                    return;
-                }
-
-                self.convertedURL = url;
-
-                self.status.text =
-                    @"✅ OpenVoice 转换完成，可以试听";
-
-                self.play.enabled = YES;
-                self.convert.enabled = YES;
-            });
-        };
-
-    NSMethodSignature *sig =
-        [manager methodSignatureForSelector:selector];
-
-    if (!sig) {
-
-        self.status.text =
-            @"❌ 无法取得方法签名";
-
-        self.convert.enabled = YES;
-
-        return;
+        if (found.count >= 80)
+            break;
     }
 
-    NSInvocation *inv =
-        [NSInvocation invocationWithMethodSignature:sig];
-
-    inv.target = manager;
-    inv.selector = selector;
-
-    NSURL *input = self.recordURL;
-    id progress = nil;
-    id completionArg = completion;
-
-    [inv setArgument:&input atIndex:2];
-    [inv setArgument:&progress atIndex:3];
-    [inv setArgument:&completionArg atIndex:4];
-
-    @try {
-
-        [inv invoke];
-
-    } @catch (NSException *e) {
-
-        self.status.text =
-            [NSString stringWithFormat:
-             @"❌ 调用失败：%@",
-             e.reason];
-
-        self.convert.enabled = YES;
-    }
-}
-
-- (void)playPressed {
-
-    if (!self.convertedURL) {
-        self.status.text = @"❌ 没有转换结果";
-        return;
+    if (found.count == 0) {
+        [out appendString:@"❌ 没找到明显的 OpenVoice 模型资源\n"];
     }
 
-    NSError *error = nil;
+    [out appendString:@"\n━━ 检测次数 ━━\n"];
+    [out appendFormat:@"%ld 秒\n",
+     (long)self.count];
 
-    self.player =
-        [[AVAudioPlayer alloc]
-         initWithContentsOfURL:self.convertedURL
-         error:&error];
+    if (ready) {
 
-    if (error) {
+        [out appendString:
+         @"\n🎉 模型已经 Ready，可以进入下一阶段。"];
 
-        self.status.text =
-            [NSString stringWithFormat:
-             @"❌ 播放失败：%@",
-             error.localizedDescription];
+        [self.timer invalidate];
+        self.timer = nil;
+    } else if (self.count >= 15) {
 
-        return;
+        [out appendString:
+         @"\n⚠️ 等待 15 秒后仍未 Ready。"];
+
+        [self.timer invalidate];
+        self.timer = nil;
+    } else {
+
+        [out appendString:
+         @"\n⏳ 正在等待模型初始化……"];
     }
 
-    [self.player prepareToPlay];
-    [self.player play];
-
-    self.status.text =
-        @"▶️ 正在试听";
+    self.textView.text = out;
 }
 
 @end
 
-@interface VR052Launcher : NSObject
+
+@interface VR053Launcher : NSObject
 @end
 
-@implementation VR052Launcher
+@implementation VR053Launcher
 
 + (void)load {
 
     dispatch_after(
         dispatch_time(DISPATCH_TIME_NOW,
-                      3 * NSEC_PER_SEC),
+                      (int64_t)(3 * NSEC_PER_SEC)),
         dispatch_get_main_queue(), ^{
 
         UIWindow *window = nil;
@@ -547,14 +315,14 @@
         if (@available(iOS 13.0, *)) {
 
             for (UIScene *scene in
-                 UIApplication.sharedApplication.connectedScenes) {
+                 [UIApplication sharedApplication].connectedScenes) {
 
                 if (scene.activationState !=
                     UISceneActivationStateForegroundActive)
                     continue;
 
                 if (![scene isKindOfClass:
-                      [UIWindowScene class]])
+                     [UIWindowScene class]])
                     continue;
 
                 for (UIWindow *w in
@@ -566,34 +334,34 @@
                     }
                 }
 
-                if (window) break;
+                if (window)
+                    break;
             }
         }
 
         if (!window)
             window =
-                UIApplication.sharedApplication.keyWindow;
+                [UIApplication sharedApplication].keyWindow;
 
-        if (!window) return;
+        if (!window)
+            return;
 
         UIButton *button =
             [UIButton buttonWithType:UIButtonTypeSystem];
 
         button.frame =
-            CGRectMake(window.bounds.size.width - 120,
+            CGRectMake(window.bounds.size.width - 125,
                        120,
-                       105,
+                       110,
                        45);
 
         button.autoresizingMask =
             UIViewAutoresizingFlexibleLeftMargin;
 
-        button.backgroundColor =
-            [UIColor colorWithWhite:0.95 alpha:0.95];
-
         button.layer.cornerRadius = 22;
+        button.layer.borderWidth = 1;
 
-        [button setTitle:@"语音 V0.5.2"
+        [button setTitle:@"V0.5.3"
                 forState:UIControlStateNormal];
 
         [button addTarget:self
@@ -612,8 +380,8 @@
     while (root.presentedViewController)
         root = root.presentedViewController;
 
-    VR052VC *vc =
-        [[VR052VC alloc] init];
+    VR053VC *vc =
+        [[VR053VC alloc] init];
 
     UINavigationController *nav =
         [[UINavigationController alloc]
