@@ -7,10 +7,12 @@
 typedef void (*HBVoiceOriginalFunc)(id, SEL, id);
 
 static HBVoiceOriginalFunc HBOriginalGetNewVoiceServerList = NULL;
+
 static BOOL HBHookInstalled = NO;
 static BOOL HBHookAlertShown = NO;
+static BOOL HBMethodCalledAlertShown = NO;
 
-#pragma mark - Logging
+#pragma mark - Log
 
 static void HBLog(NSString *format, ...)
 {
@@ -30,13 +32,210 @@ static void HBLog(NSString *format, ...)
     NSLog(@"[VoiceRebuild] %@", message);
 }
 
-#pragma mark - Object Logging
+#pragma mark - Find Current ViewController
+
+static UIViewController *HBTopViewController(void)
+{
+    UIWindow *window = nil;
+
+    if (@available(iOS 13.0, *)) {
+
+        for (UIScene *scene
+             in [UIApplication sharedApplication].connectedScenes) {
+
+            if (scene.activationState !=
+                UISceneActivationStateForegroundActive) {
+                continue;
+            }
+
+            if (![scene isKindOfClass:[UIWindowScene class]]) {
+                continue;
+            }
+
+            UIWindowScene *windowScene =
+                (UIWindowScene *)scene;
+
+            for (UIWindow *candidate
+                 in windowScene.windows) {
+
+                if (candidate.isKeyWindow) {
+
+                    window = candidate;
+
+                    break;
+                }
+            }
+
+            if (window) {
+                break;
+            }
+        }
+    }
+
+    if (!window) {
+
+        window =
+            [UIApplication sharedApplication].keyWindow;
+    }
+
+    if (!window) {
+        return nil;
+    }
+
+    UIViewController *vc =
+        window.rootViewController;
+
+    if (!vc) {
+        return nil;
+    }
+
+    while (vc.presentedViewController) {
+
+        vc =
+            vc.presentedViewController;
+    }
+
+    return vc;
+}
+
+#pragma mark - Hook Success Alert
+
+static void HBShowHookSuccessAlert(void)
+{
+    if (HBHookAlertShown) {
+        return;
+    }
+
+    HBHookAlertShown = YES;
+
+    dispatch_async(dispatch_get_main_queue(), ^{
+
+        @autoreleasepool {
+
+            UIViewController *vc =
+                HBTopViewController();
+
+            if (!vc) {
+
+                HBLog(
+                    @"无法找到当前 ViewController"
+                );
+
+                return;
+            }
+
+            UIAlertController *alert =
+                [UIAlertController
+                    alertControllerWithTitle:@"HB语音 Hook"
+                    message:@"getNewVoiceServerList: 已成功 Hook"
+                    preferredStyle:UIAlertControllerStyleAlert];
+
+            [alert addAction:
+                [UIAlertAction
+                    actionWithTitle:@"确定"
+                    style:UIAlertActionStyleDefault
+                    handler:nil]];
+
+            [vc presentViewController:alert
+                             animated:YES
+                           completion:^{
+
+                HBLog(
+                    @"Hook success alert presented"
+                );
+            }];
+        }
+    });
+}
+
+#pragma mark - Method Called Alert
+
+static void HBShowMethodCalledAlert(id arg)
+{
+    if (HBMethodCalledAlertShown) {
+        return;
+    }
+
+    HBMethodCalledAlertShown = YES;
+
+    NSString *argumentClass =
+        arg
+        ? NSStringFromClass([arg class])
+        : @"nil";
+
+    NSString *argumentDescription =
+        arg
+        ? [NSString stringWithFormat:@"%@", arg]
+        : @"nil";
+
+    /*
+     * 防止参数 description 太长把弹窗撑爆
+     */
+    if (argumentDescription.length > 500) {
+
+        argumentDescription =
+            [argumentDescription
+                substringToIndex:500];
+    }
+
+    NSString *message =
+        [NSString stringWithFormat:
+            @"getNewVoiceServerList: 被调用\n\n"
+             "参数类型：%@\n\n"
+             "参数内容：%@",
+            argumentClass,
+            argumentDescription];
+
+    dispatch_async(dispatch_get_main_queue(), ^{
+
+        @autoreleasepool {
+
+            UIViewController *vc =
+                HBTopViewController();
+
+            if (!vc) {
+
+                HBLog(
+                    @"方法被调用，但无法找到 ViewController"
+                );
+
+                return;
+            }
+
+            UIAlertController *alert =
+                [UIAlertController
+                    alertControllerWithTitle:@"HB语音"
+                    message:message
+                    preferredStyle:UIAlertControllerStyleAlert];
+
+            [alert addAction:
+                [UIAlertAction
+                    actionWithTitle:@"确定"
+                    style:UIAlertActionStyleDefault
+                    handler:nil]];
+
+            [vc presentViewController:alert
+                             animated:YES
+                           completion:^{
+
+                HBLog(
+                    @"Method called alert presented"
+                );
+            }];
+        }
+    });
+}
+
+#pragma mark - Object Log
 
 static void HBLogObject(id obj, NSString *name)
 {
     if (!obj) {
 
-        HBLog(@"%@ = nil", name);
+        HBLog(
+            @"%@ = nil",
+            name
+        );
 
         return;
     }
@@ -54,8 +253,7 @@ static void HBLogObject(id obj, NSString *name)
     );
 
     /*
-     * 如果参数是 UIAlertController，
-     * 额外记录里面的信息。
+     * 如果参数是 UIAlertController
      */
     if ([obj isKindOfClass:[UIAlertController class]]) {
 
@@ -80,7 +278,8 @@ static void HBLogObject(id obj, NSString *name)
             (unsigned long)alert.actions.count
         );
 
-        for (UIAlertAction *action in alert.actions) {
+        for (UIAlertAction *action
+             in alert.actions) {
 
             HBLog(
                 @"%@ action = %@",
@@ -91,126 +290,7 @@ static void HBLogObject(id obj, NSString *name)
     }
 }
 
-#pragma mark - Debug Alert
-
-static void HBShowHookSuccessAlert(void)
-{
-    if (HBHookAlertShown) {
-        return;
-    }
-
-    HBHookAlertShown = YES;
-
-    dispatch_async(dispatch_get_main_queue(), ^{
-
-        @autoreleasepool {
-
-            UIWindow *window = nil;
-
-            /*
-             * iOS 13+
-             */
-            if (@available(iOS 13.0, *)) {
-
-                for (UIScene *scene
-                     in [UIApplication sharedApplication].connectedScenes) {
-
-                    if (scene.activationState !=
-                        UISceneActivationStateForegroundActive) {
-                        continue;
-                    }
-
-                    if (![scene
-                          isKindOfClass:[UIWindowScene class]]) {
-                        continue;
-                    }
-
-                    UIWindowScene *windowScene =
-                        (UIWindowScene *)scene;
-
-                    for (UIWindow *candidate
-                         in windowScene.windows) {
-
-                        if (candidate.isKeyWindow) {
-
-                            window = candidate;
-
-                            break;
-                        }
-                    }
-
-                    if (window) {
-                        break;
-                    }
-                }
-            }
-
-            /*
-             * 兼容旧方式
-             */
-            if (!window) {
-
-                window =
-                    [UIApplication sharedApplication].keyWindow;
-            }
-
-            if (!window) {
-
-                HBLog(
-                    @"无法找到当前 UIWindow，"
-                    @"跳过 Hook 成功弹窗"
-                );
-
-                return;
-            }
-
-            UIViewController *root =
-                window.rootViewController;
-
-            if (!root) {
-
-                HBLog(
-                    @"rootViewController = nil"
-                );
-
-                return;
-            }
-
-            /*
-             * 找到最上层控制器
-             */
-            while (root.presentedViewController) {
-
-                root =
-                    root.presentedViewController;
-            }
-
-            UIAlertController *alert =
-                [UIAlertController
-                    alertControllerWithTitle:@"HB语音 Hook"
-                    message:@"getNewVoiceServerList: 已成功 Hook"
-                    preferredStyle:UIAlertControllerStyleAlert];
-
-            [alert addAction:
-                [UIAlertAction
-                    actionWithTitle:@"确定"
-                    style:UIAlertActionStyleDefault
-                    handler:nil]];
-
-            [root
-                presentViewController:alert
-                animated:YES
-                completion:^{
-
-                    HBLog(
-                        @"Hook success alert presented"
-                    );
-                }];
-        }
-    });
-}
-
-#pragma mark - Hook Function
+#pragma mark - Hooked Method
 
 static void HBHookedGetNewVoiceServerList(
     id self,
@@ -237,7 +317,12 @@ static void HBHookedGetNewVoiceServerList(
     );
 
     /*
-     * 原始参数
+     * 第一次调用时弹窗
+     */
+    HBShowMethodCalledAlert(arg);
+
+    /*
+     * 记录调用前参数
      */
     HBLogObject(
         arg,
@@ -245,7 +330,7 @@ static void HBHookedGetNewVoiceServerList(
     );
 
     /*
-     * 调用原始方法
+     * 调用原始 IMP
      */
     if (HBOriginalGetNewVoiceServerList) {
 
@@ -271,7 +356,7 @@ static void HBHookedGetNewVoiceServerList(
     }
 
     /*
-     * 原方法执行之后再次查看参数
+     * 原方法执行之后
      */
     HBLogObject(
         arg,
@@ -396,7 +481,7 @@ static BOOL HookVoiceController(void)
     );
 
     /*
-     * 弹一次提示
+     * 弹出 Hook 成功提示
      */
     HBShowHookSuccessAlert();
 
@@ -417,14 +502,14 @@ static void HBTryInstallHook(void)
     if (success) {
 
         HBLog(
-            @"Hook 安装完成，停止检查"
+            @"Hook 安装完成"
         );
 
         return;
     }
 
     HBLog(
-        @"3 秒后继续检查 VoiceSelectController..."
+        @"3 秒后继续检查..."
     );
 
     dispatch_after(
@@ -460,7 +545,7 @@ static void StartVoiceHook(void)
     );
 
     /*
-     * 给微信一点初始化时间
+     * 微信启动 5 秒后开始寻找类
      */
     dispatch_after(
         dispatch_time(
