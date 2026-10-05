@@ -1,395 +1,125 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
-#import <objc/message.h>
 #import <mach-o/dyld.h>
+#import <mach-o/getsect.h>
+#import <mach-o/loader.h>
+#import <mach/mach.h>
 
-@interface VR053VC : UIViewController
-@property(nonatomic,strong) UITextView *textView;
-@property(nonatomic,strong) NSTimer *timer;
-@property(nonatomic,assign) NSInteger count;
-@end
+static void ScanOpenVoiceImages(void) {
+    NSMutableString *result = [NSMutableString string];
 
-@implementation VR053VC
+    uint32_t count = _dyld_image_count();
 
-- (void)viewDidLoad {
-    [super viewDidLoad];
+    [result appendFormat:@"扫描 Mach-O 镜像：%u 个\n\n", count];
 
-    self.view.backgroundColor = [UIColor whiteColor];
-    self.title = @"V0.5.3 模型诊断";
+    int found = 0;
 
-    self.textView = [[UITextView alloc] initWithFrame:CGRectZero];
-    self.textView.translatesAutoresizingMaskIntoConstraints = NO;
-    self.textView.editable = NO;
-    self.textView.font = [UIFont systemFontOfSize:14];
-    [self.view addSubview:self.textView];
+    for (uint32_t i = 0; i < count; i++) {
+        const char *name = _dyld_get_image_name(i);
+        if (!name) continue;
 
-    [NSLayoutConstraint activateConstraints:@[
-        [self.textView.topAnchor constraintEqualToAnchor:
-         self.view.safeAreaLayoutGuide.topAnchor constant:10],
+        const struct mach_header_64 *header =
+            (const struct mach_header_64 *)_dyld_get_image_header(i);
 
-        [self.textView.bottomAnchor constraintEqualToAnchor:
-         self.view.bottomAnchor constant:-10],
-
-        [self.textView.leadingAnchor constraintEqualToAnchor:
-         self.view.leadingAnchor constant:10],
-
-        [self.textView.trailingAnchor constraintEqualToAnchor:
-         self.view.trailingAnchor constant:-10]
-    ]];
-
-    [self refresh];
-
-    self.timer =
-        [NSTimer scheduledTimerWithTimeInterval:1.0
-                                         target:self
-                                       selector:@selector(refresh)
-                                       userInfo:nil
-                                        repeats:YES];
-}
-
-- (void)dealloc {
-    [self.timer invalidate];
-}
-
-- (void)refresh {
-
-    self.count++;
-
-    NSMutableString *out =
-        [NSMutableString string];
-
-    [out appendString:@"V0.5.3 OpenVoice 模型诊断\n\n"];
-
-    Class cls =
-        NSClassFromString(@"SHVoiceReconstructionManager");
-
-    if (!cls) {
-
-        [out appendString:
-         @"❌ SHVoiceReconstructionManager 不存在\n"];
-
-        self.textView.text = out;
-        return;
-    }
-
-    [out appendString:
-     @"✅ SHVoiceReconstructionManager\n"];
-
-    SEL sharedSEL =
-        NSSelectorFromString(@"sharedManager");
-
-    id manager = nil;
-
-    if ([cls respondsToSelector:sharedSEL]) {
-
-        manager =
-            ((id (*)(id, SEL))objc_msgSend)(
-                cls,
-                sharedSEL
-            );
-    }
-
-    if (!manager) {
-
-        [out appendString:
-         @"❌ sharedManager 返回为空\n"];
-
-        self.textView.text = out;
-        return;
-    }
-
-    [out appendString:@"✅ sharedManager\n\n"];
-
-    BOOL ready = NO;
-
-    SEL readySEL =
-        NSSelectorFromString(@"modelReady");
-
-    if ([manager respondsToSelector:readySEL]) {
-
-        ready =
-            ((BOOL (*)(id, SEL))objc_msgSend)(
-                manager,
-                readySEL
-            );
-    }
-
-    [out appendFormat:
-     @"modelReady：%@\n",
-     ready ? @"✅ YES" : @"⚠️ NO"];
-
-    NSString *status = nil;
-
-    SEL statusSEL =
-        NSSelectorFromString(@"modelStatusText");
-
-    if ([manager respondsToSelector:statusSEL]) {
-
-        status =
-            ((id (*)(id, SEL))objc_msgSend)(
-                manager,
-                statusSEL
-            );
-    }
-
-    [out appendFormat:
-     @"modelStatusText：%@\n\n",
-     status.length ? status : @"(空)"];
-
-    NSArray *tones = nil;
-
-    SEL tonesSEL =
-        NSSelectorFromString(@"tones");
-
-    if ([manager respondsToSelector:tonesSEL]) {
-
-        tones =
-            ((id (*)(id, SEL))objc_msgSend)(
-                manager,
-                tonesSEL
-            );
-    }
-
-    [out appendFormat:
-     @"音色数量：%lu\n\n",
-     (unsigned long)tones.count];
-
-    /*
-     * 查找当前进程加载的 dylib。
-     */
-    [out appendString:@"━━ dylib 路径 ━━\n"];
-
-    uint32_t imageCount =
-        _dyld_image_count();
-
-    for (uint32_t i = 0;
-         i < imageCount;
-         i++) {
-
-        const char *name =
-            _dyld_get_image_name(i);
-
-        if (!name)
+        if (!header || header->magic != MH_MAGIC_64)
             continue;
 
-        NSString *path =
-            [NSString stringWithUTF8String:name];
+        const struct section_64 *section =
+            getsectbynamefromheader_64(header, "__DATA", "__ovmodel");
 
-        NSString *lower =
-            path.lowercaseString;
+        if (!section) {
+            section =
+                getsectbynamefromheader_64(header, "__TEXT", "__ovmodel");
+        }
 
-        if ([lower containsString:@"hangt"] ||
-            [lower containsString:@"senhang"] ||
-            [lower containsString:@"openvoice"] ||
-            [lower containsString:@"voicerebuild"]) {
+        if (!section) {
+            section =
+                getsectbynamefromheader_64(header, "__DATA_CONST", "__ovmodel");
+        }
 
-            [out appendFormat:@"%@\n", path];
+        if (section) {
+            found++;
+
+            [result appendFormat:
+                @"🔥 找到 __ovmodel\n"
+                 @"镜像：%s\n"
+                 @"地址：0x%llx\n"
+                 @"大小：%llu bytes\n\n",
+                name,
+                section->addr,
+                section->size];
         }
     }
 
-    /*
-     * 检查常见模型资源名称。
-     */
-    [out appendString:@"\n━━ 模型资源扫描 ━━\n"];
-
-    NSArray *keywords = @[
-        @"OpenVoice",
-        @"openvoice",
-        @"SenHang",
-        @"senhang",
-        @"SpeakerEncoder",
-        @"VoiceConverter",
-        @".mlmodelc"
-    ];
-
-    NSFileManager *fm =
-        [NSFileManager defaultManager];
-
-    NSMutableSet *found =
-        [NSMutableSet set];
-
-    NSArray *roots = @[
-        [NSBundle mainBundle].bundlePath,
-        [NSBundle mainBundle].resourcePath,
-        NSTemporaryDirectory()
-    ];
-
-    for (NSString *root in roots) {
-
-        NSDirectoryEnumerator *enumerator =
-            [fm enumeratorAtPath:root];
-
-        NSString *relative = nil;
-
-        while ((relative = [enumerator nextObject])) {
-
-            NSString *full =
-                [root stringByAppendingPathComponent:relative];
-
-            NSString *lower =
-                full.lowercaseString;
-
-            BOOL match = NO;
-
-            for (NSString *key in keywords) {
-
-                if ([lower containsString:
-                     key.lowercaseString]) {
-
-                    match = YES;
-                    break;
-                }
-            }
-
-            if (match) {
-
-                if (![found containsObject:full]) {
-
-                    [found addObject:full];
-
-                    [out appendFormat:
-                     @"%@\n",
-                     full];
-                }
-            }
-
-            /*
-             * 防止扫描异常庞大的目录。
-             */
-            if (found.count >= 80)
-                break;
-        }
-
-        if (found.count >= 80)
-            break;
-    }
-
-    if (found.count == 0) {
-        [out appendString:@"❌ 没找到明显的 OpenVoice 模型资源\n"];
-    }
-
-    [out appendString:@"\n━━ 检测次数 ━━\n"];
-    [out appendFormat:@"%ld 秒\n",
-     (long)self.count];
-
-    if (ready) {
-
-        [out appendString:
-         @"\n🎉 模型已经 Ready，可以进入下一阶段。"];
-
-        [self.timer invalidate];
-        self.timer = nil;
-    } else if (self.count >= 15) {
-
-        [out appendString:
-         @"\n⚠️ 等待 15 秒后仍未 Ready。"];
-
-        [self.timer invalidate];
-        self.timer = nil;
+    if (found == 0) {
+        [result appendString:@"❌ 当前没有发现 __ovmodel\n\n"];
     } else {
-
-        [out appendString:
-         @"\n⏳ 正在等待模型初始化……"];
+        [result appendFormat:@"\n✅ 共发现 %d 个 __ovmodel\n", found];
     }
 
-    self.textView.text = out;
-}
+    // 检查预期模型缓存目录
+    NSString *cache =
+        [NSHomeDirectory() stringByAppendingPathComponent:
+         @"Library/Caches/SenHangVoiceModels"];
 
-@end
+    [result appendFormat:
+        @"\n模型缓存目录：\n%@\n",
+        cache];
 
+    NSFileManager *fm = [NSFileManager defaultManager];
 
-@interface VR053Launcher : NSObject
-@end
+    BOOL isDir = NO;
+    BOOL exists = [fm fileExistsAtPath:cache isDirectory:&isDir];
 
-@implementation VR053Launcher
+    if (!exists) {
+        [result appendString:@"❌ 缓存目录不存在\n"];
+    } else {
+        [result appendFormat:@"✅ 缓存目录存在（目录=%@）\n",
+         isDir ? @"YES" : @"NO"];
 
-+ (void)load {
+        NSArray *items = [fm contentsOfDirectoryAtPath:cache error:nil];
 
-    dispatch_after(
-        dispatch_time(DISPATCH_TIME_NOW,
-                      (int64_t)(3 * NSEC_PER_SEC)),
-        dispatch_get_main_queue(), ^{
+        [result appendFormat:@"项目数量：%lu\n",
+         (unsigned long)items.count];
 
-        UIWindow *window = nil;
-
-        if (@available(iOS 13.0, *)) {
-
-            for (UIScene *scene in
-                 [UIApplication sharedApplication].connectedScenes) {
-
-                if (scene.activationState !=
-                    UISceneActivationStateForegroundActive)
-                    continue;
-
-                if (![scene isKindOfClass:
-                     [UIWindowScene class]])
-                    continue;
-
-                for (UIWindow *w in
-                     ((UIWindowScene *)scene).windows) {
-
-                    if (w.isKeyWindow) {
-                        window = w;
-                        break;
-                    }
-                }
-
-                if (window)
-                    break;
-            }
+        for (NSString *item in items) {
+            [result appendFormat:@"  %@\n", item];
         }
+    }
 
-        if (!window)
-            window =
-                [UIApplication sharedApplication].keyWindow;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        UIAlertController *alert =
+            [UIAlertController alertControllerWithTitle:@"OpenVoice 模型扫描"
+                                                message:result
+                                         preferredStyle:UIAlertControllerStyleAlert];
 
-        if (!window)
-            return;
+        [alert addAction:
+            [UIAlertAction actionWithTitle:@"复制结果"
+                                     style:UIAlertActionStyleDefault
+                                   handler:^(UIAlertAction *action) {
+            UIPasteboard.generalPasteboard.string = result;
+        }]];
 
-        UIButton *button =
-            [UIButton buttonWithType:UIButtonTypeSystem];
+        [alert addAction:
+            [UIAlertAction actionWithTitle:@"关闭"
+                                     style:UIAlertActionStyleCancel
+                                   handler:nil]];
 
-        button.frame =
-            CGRectMake(window.bounds.size.width - 125,
-                       120,
-                       110,
-                       45);
+        UIViewController *vc = UIApplication.sharedApplication.keyWindow.rootViewController;
 
-        button.autoresizingMask =
-            UIViewAutoresizingFlexibleLeftMargin;
+        while (vc.presentedViewController)
+            vc = vc.presentedViewController;
 
-        button.layer.cornerRadius = 22;
-        button.layer.borderWidth = 1;
-
-        [button setTitle:@"V0.5.3"
-                forState:UIControlStateNormal];
-
-        [button addTarget:self
-                   action:@selector(open:)
-         forControlEvents:UIControlEventTouchUpInside];
-
-        [window addSubview:button];
+        [vc presentViewController:alert animated:YES completion:nil];
     });
 }
 
-+ (void)open:(UIButton *)sender {
-
-    UIViewController *root =
-        sender.window.rootViewController;
-
-    while (root.presentedViewController)
-        root = root.presentedViewController;
-
-    VR053VC *vc =
-        [[VR053VC alloc] init];
-
-    UINavigationController *nav =
-        [[UINavigationController alloc]
-         initWithRootViewController:vc];
-
-    [root presentViewController:nav
-                       animated:YES
-                     completion:nil];
+__attribute__((constructor))
+static void VoiceScanInit(void) {
+    dispatch_after(
+        dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5 * NSEC_PER_SEC)),
+        dispatch_get_main_queue(), ^{
+            ScanOpenVoiceImages();
+        }
+    );
 }
-
-@end
