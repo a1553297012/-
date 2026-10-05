@@ -1,5 +1,6 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
+#import <QuartzCore/QuartzCore.h>
 #import <objc/runtime.h>
 
 #pragma mark - Log
@@ -46,9 +47,11 @@ static void HBWriteLog(NSString *format, ...)
     NSLog(@"[HBVoicePlugin] %@", message);
 }
 
-#pragma mark - Voice Tool Controller
+#pragma mark - Voice Tool View Controller
 
-@interface HBVoiceToolViewController : UIViewController
+@interface HBVoiceToolViewController
+    : UIViewController
+    <UITableViewDataSource, UITableViewDelegate>
 @end
 
 @implementation HBVoiceToolViewController
@@ -59,13 +62,24 @@ static void HBWriteLog(NSString *format, ...)
 
     self.title = @"语音工具";
 
-    self.view.backgroundColor =
-        [UIColor systemGroupedBackgroundColor];
+    /*
+     * 兼容旧版 iOS
+     */
+    if (@available(iOS 13.0, *))
+    {
+        self.view.backgroundColor =
+            [UIColor systemGroupedBackgroundColor];
+    }
+    else
+    {
+        self.view.backgroundColor =
+            [UIColor groupTableViewBackgroundColor];
+    }
 
     UITableView *tableView =
         [[UITableView alloc]
          initWithFrame:self.view.bounds
-         style:UITableViewStyleInsetGrouped];
+         style:UITableViewStyleGrouped];
 
     tableView.autoresizingMask =
         UIViewAutoresizingFlexibleWidth |
@@ -79,7 +93,7 @@ static void HBWriteLog(NSString *format, ...)
     HBWriteLog(@"语音工具页面创建成功");
 }
 
-#pragma mark UITableView
+#pragma mark - UITableViewDataSource
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView
 {
@@ -90,7 +104,9 @@ static void HBWriteLog(NSString *format, ...)
  numberOfRowsInSection:(NSInteger)section
 {
     if (section == 0)
+    {
         return 3;
+    }
 
     return 2;
 }
@@ -99,7 +115,9 @@ static void HBWriteLog(NSString *format, ...)
 titleForHeaderInSection:(NSInteger)section
 {
     if (section == 0)
+    {
         return @"语音功能";
+    }
 
     return @"语音设置";
 }
@@ -122,25 +140,31 @@ cellForRowAtIndexPath:(NSIndexPath *)indexPath
              reuseIdentifier:identifier];
     }
 
-    cell.accessoryType =
-        UITableViewCellAccessoryDisclosureIndicator;
+    cell.textLabel.text = nil;
+    cell.detailTextLabel.text = nil;
 
     if (indexPath.section == 0)
     {
+        cell.accessoryType =
+            UITableViewCellAccessoryDisclosureIndicator;
+
         if (indexPath.row == 0)
         {
             cell.textLabel.text = @"文本转语音";
-            cell.detailTextLabel.text = @"将文字转换成语音";
+            cell.detailTextLabel.text =
+                @"将文字转换成语音";
         }
         else if (indexPath.row == 1)
         {
             cell.textLabel.text = @"音频文件";
-            cell.detailTextLabel.text = @"选择本地音频";
+            cell.detailTextLabel.text =
+                @"选择本地音频";
         }
         else
         {
             cell.textLabel.text = @"音色设置";
-            cell.detailTextLabel.text = @"选择语音音色";
+            cell.detailTextLabel.text =
+                @"选择语音音色";
         }
     }
     else
@@ -150,18 +174,26 @@ cellForRowAtIndexPath:(NSIndexPath *)indexPath
 
         if (indexPath.row == 0)
         {
-            cell.textLabel.text = @"自定义语音时长";
-            cell.detailTextLabel.text = @"开发中";
+            cell.textLabel.text =
+                @"自定义语音时长";
+
+            cell.detailTextLabel.text =
+                @"开发中";
         }
         else
         {
-            cell.textLabel.text = @"随机语音时长";
-            cell.detailTextLabel.text = @"开发中";
+            cell.textLabel.text =
+                @"随机语音时长";
+
+            cell.detailTextLabel.text =
+                @"开发中";
         }
     }
 
     return cell;
 }
+
+#pragma mark - UITableViewDelegate
 
 - (void)tableView:(UITableView *)tableView
 didSelectRowAtIndexPath:(NSIndexPath *)indexPath
@@ -175,13 +207,16 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
         (long)indexPath.row
     );
 
+    /*
+     * 第一项暂时作为测试
+     */
     if (indexPath.section == 0 &&
         indexPath.row == 0)
     {
         UIAlertController *alert =
             [UIAlertController
              alertControllerWithTitle:@"文本转语音"
-             message:@"下一步将实现文本转语音功能"
+             message:@"文本转语音功能将在下一步实现"
              preferredStyle:UIAlertControllerStyleAlert];
 
         [alert addAction:
@@ -230,6 +265,19 @@ static void HBHookNewSettingViewController(void)
         return;
     }
 
+    static BOOL alreadyHooked = NO;
+
+    if (alreadyHooked)
+    {
+        HBWriteLog(
+            @"NewSettingViewController 已经 Hook"
+        );
+
+        return;
+    }
+
+    alreadyHooked = YES;
+
     static IMP originalIMP = NULL;
 
     originalIMP =
@@ -259,10 +307,16 @@ static void HBHookNewSettingViewController(void)
                     [self.view viewWithTag:952713];
 
                 if (marker)
+                {
+                    HBWriteLog(
+                        @"语音工具按钮已经存在"
+                    );
+
                     return;
+                }
 
                 /*
-                 * 创建我们的入口按钮
+                 * 创建按钮
                  */
                 UIButton *button =
                     [UIButton buttonWithType:
@@ -273,20 +327,34 @@ static void HBHookNewSettingViewController(void)
                 [button setTitle:@"语音工具"
                          forState:UIControlStateNormal];
 
+                CGFloat width =
+                    self.view.bounds.size.width;
+
+                CGFloat height =
+                    self.view.bounds.size.height;
+
                 button.frame =
                     CGRectMake(
-                        20,
-                        self.view.bounds.size.height - 80,
-                        self.view.bounds.size.width - 40,
-                        50
+                        20.0,
+                        height - 80.0,
+                        width - 40.0,
+                        50.0
                     );
 
                 button.autoresizingMask =
                     UIViewAutoresizingFlexibleWidth |
                     UIViewAutoresizingFlexibleTopMargin;
 
-                button.backgroundColor =
-                    [UIColor secondarySystemBackgroundColor];
+                if (@available(iOS 13.0, *))
+                {
+                    button.backgroundColor =
+                        [UIColor secondarySystemBackgroundColor];
+                }
+                else
+                {
+                    button.backgroundColor =
+                        [UIColor whiteColor];
+                }
 
                 button.layer.cornerRadius = 12.0;
 
@@ -312,7 +380,9 @@ static void HBHookNewSettingViewController(void)
 #pragma mark - Button Action
 
 @interface UIViewController (HBVoicePlugin)
+
 - (void)HBVoiceToolButtonPressed:(id)sender;
+
 @end
 
 @implementation UIViewController (HBVoicePlugin)
@@ -353,17 +423,24 @@ static void HBVoicePluginInit(void)
     {
         HBWriteLog(@"========================================");
         HBWriteLog(@"HB VOICE PLUGIN START");
+        HBWriteLog(@"VERSION = 1.0");
         HBWriteLog(@"PID = %d", getpid());
-        HBWriteLog(@"PROCESS = %@",
-                   [[NSProcessInfo processInfo] processName]);
+
+        HBWriteLog(
+            @"PROCESS = %@",
+            [[NSProcessInfo processInfo] processName]
+        );
+
         HBWriteLog(@"========================================");
 
         /*
-         * 等微信完成启动以后再 Hook。
+         * 等微信启动完成以后再 Hook
          */
         dispatch_after(
-            dispatch_time(DISPATCH_TIME_NOW,
-                          (int64_t)(5 * NSEC_PER_SEC)),
+            dispatch_time(
+                DISPATCH_TIME_NOW,
+                (int64_t)(5 * NSEC_PER_SEC)
+            ),
             dispatch_get_main_queue(),
             ^{
                 HBHookNewSettingViewController();
