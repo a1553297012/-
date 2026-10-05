@@ -4,19 +4,14 @@
 
 #pragma mark - Global
 
-typedef void (*HBVoidFunc)(id, SEL);
 typedef void (*HBVoiceOriginalFunc)(id, SEL, id);
 
-static BOOL HBViewHookInstalled = NO;
-static BOOL HBMethodHookInstalled = NO;
-
-static HBVoidFunc HBOriginalViewDidAppear = NULL;
 static HBVoiceOriginalFunc HBOriginalGetNewVoiceServerList = NULL;
 
-static BOOL HBViewAlertShown = NO;
-static BOOL HBMethodAlertShown = NO;
+static BOOL HBHookInstalled = NO;
+static BOOL HBDetailAlertShown = NO;
 
-#pragma mark - Logging
+#pragma mark - Log
 
 static void HBLog(NSString *format, ...)
 {
@@ -33,7 +28,10 @@ static void HBLog(NSString *format, ...)
 
     va_end(args);
 
-    NSLog(@"[VoiceRebuild] %@", message);
+    NSLog(
+        @"[VoiceRebuild] %@",
+        message
+    );
 }
 
 #pragma mark - Top ViewController
@@ -49,10 +47,13 @@ static UIViewController *HBTopViewController(void)
 
             if (scene.activationState !=
                 UISceneActivationStateForegroundActive) {
+
                 continue;
             }
 
-            if (![scene isKindOfClass:[UIWindowScene class]]) {
+            if (![scene isKindOfClass:
+                    [UIWindowScene class]]) {
+
                 continue;
             }
 
@@ -63,7 +64,9 @@ static UIViewController *HBTopViewController(void)
                  in windowScene.windows) {
 
                 if (candidate.isKeyWindow) {
+
                     window = candidate;
+
                     break;
                 }
             }
@@ -75,7 +78,9 @@ static UIViewController *HBTopViewController(void)
     }
 
     if (!window) {
-        window = [UIApplication sharedApplication].keyWindow;
+
+        window =
+            [UIApplication sharedApplication].keyWindow;
     }
 
     if (!window) {
@@ -90,191 +95,192 @@ static UIViewController *HBTopViewController(void)
     }
 
     while (vc.presentedViewController) {
-        vc = vc.presentedViewController;
+
+        vc =
+            vc.presentedViewController;
     }
 
     return vc;
 }
 
-#pragma mark - Alert
+#pragma mark - Safe String
 
-static void HBShowAlert(NSString *title,
-                        NSString *message)
+static NSString *HBSafeString(id obj)
 {
-    dispatch_async(dispatch_get_main_queue(), ^{
+    if (!obj) {
+        return @"nil";
+    }
 
-        @autoreleasepool {
+    @try {
 
-            UIViewController *vc =
-                HBTopViewController();
+        return [NSString stringWithFormat:@"%@", obj];
 
-            if (!vc) {
-                HBLog(@"无法找到当前 ViewController");
-                return;
-            }
+    } @catch (...) {
 
-            UIAlertController *alert =
-                [UIAlertController
-                    alertControllerWithTitle:title
-                    message:message
-                    preferredStyle:UIAlertControllerStyleAlert];
-
-            [alert addAction:
-                [UIAlertAction
-                    actionWithTitle:@"确定"
-                    style:UIAlertActionStyleDefault
-                    handler:nil]];
-
-            [vc presentViewController:alert
-                             animated:YES
-                           completion:nil];
-        }
-    });
+        return @"<无法读取 description>";
+    }
 }
 
-#pragma mark - Dump VoiceSelectController Methods
+#pragma mark - UIAlertController Analysis
 
-static void HBDumpVoiceMethods(Class cls)
+static NSString *HBAlertDetail( UIAlertController *alert )
 {
-    unsigned int count = 0;
-
-    Method *methods =
-        class_copyMethodList(cls, &count);
-
-    if (!methods) {
-        HBLog(@"无法获取 VoiceSelectController 方法列表");
-        return;
+    if (!alert) {
+        return @"UIAlertController = nil";
     }
 
-    NSMutableArray *names =
-        [NSMutableArray array];
+    NSMutableString *result =
+        [NSMutableString string];
 
-    HBLog(
-        @"VoiceSelectController 方法数量: %u",
-        count
-    );
+    [result appendString:
+        @"========== UIAlertController ==========\n"];
 
-    for (unsigned int i = 0; i < count; i++) {
+    [result appendFormat:
+        @"class: %@\n",
+        NSStringFromClass([alert class])];
 
-        Method method = methods[i];
+    [result appendFormat:
+        @"address: %p\n",
+        alert];
 
-        SEL selector =
-            method_getName(method);
+    [result appendFormat:
+        @"title: %@\n",
+        alert.title ?: @"<nil>"];
 
-        const char *types =
-            method_getTypeEncoding(method);
+    [result appendFormat:
+        @"message: %@\n",
+        alert.message ?: @"<nil>"];
 
-        NSString *name =
-            NSStringFromSelector(selector);
+    [result appendFormat:
+        @"preferredStyle: %ld\n",
+        (long)alert.preferredStyle];
 
-        if (!name) {
-            continue;
+    [result appendFormat:
+        @"actions count: %lu\n",
+        (unsigned long)alert.actions.count];
+
+    [result appendString:@"\n"];
+
+    if (alert.actions.count > 0) {
+
+        [result appendString:
+            @"---------- Actions ----------\n"];
+
+        NSUInteger index = 0;
+
+        for (UIAlertAction *action
+             in alert.actions) {
+
+            [result appendFormat:
+                @"Action[%lu]\n",
+                (unsigned long)index];
+
+            [result appendFormat:
+                @"  title: %@\n",
+                action.title ?: @"<nil>"];
+
+            [result appendFormat:
+                @"  style: %ld\n",
+                (long)action.style];
+
+            [result appendFormat:
+                @"  enabled: %@\n",
+                action.enabled ? @"YES" : @"NO"];
+
+            index++;
         }
-
-        HBLog(
-            @"METHOD[%u] %@  type=%s",
-            i,
-            name,
-            types ? types : ""
-        );
-
-        /*
-         * 只把比较有意义的方法放进弹窗。
-         */
-        if ([name containsString:@"Voice"] ||
-            [name containsString:@"voice"] ||
-            [name containsString:@"Server"] ||
-            [name containsString:@"server"] ||
-            [name containsString:@"List"] ||
-            [name containsString:@"list"] ||
-            [name containsString:@"load"] ||
-            [name containsString:@"Load"] ||
-            [name containsString:@"request"] ||
-            [name containsString:@"Request"] ||
-            [name containsString:@"reload"] ||
-            [name containsString:@"Reload"]) {
-
-            [names addObject:name];
-        }
     }
 
-    free(methods);
+    [result appendString:
+        @"\n========== END ALERT =========="];
 
-    if (names.count == 0) {
-
-        HBLog(
-            @"没有发现明显的语音/列表相关方法"
-        );
-
-        return;
-    }
-
-    NSString *message =
-        [names componentsJoinedByString:@"\n"];
-
-    /*
-     * 防止弹窗过长
-     */
-    if (message.length > 2500) {
-
-        message =
-            [message substringToIndex:2500];
-    }
-
-    HBShowAlert(
-        @"VoiceSelectController 方法",
-        message
-    );
+    return result;
 }
 
-#pragma mark - viewDidAppear Hook
+#pragma mark - Show Detail
 
-static void HBHookedViewDidAppear(
-    id self,
-    SEL _cmd
+static void HBShowAlertDetail(
+    UIAlertController *alert,
+    BOOL afterOriginal
 )
 {
-    HBLog(
-        @"========================================"
-    );
+    if (HBDetailAlertShown) {
+        return;
+    }
 
-    HBLog(
-        @"VoiceSelectController viewDidAppear:"
-    );
+    HBDetailAlertShown = YES;
 
-    HBLog(
-        @"self = %@",
-        NSStringFromClass([self class])
-    );
+    NSString *detail =
+        HBAlertDetail(alert);
 
-    HBLog(
-        @"========================================"
-    );
+    if (afterOriginal) {
 
-    if (!HBViewAlertShown) {
-
-        HBViewAlertShown = YES;
-
-        HBShowAlert(
-            @"HB语音侦察",
-            @"VoiceSelectController 已经显示\n\n"
-             "说明我们现在进入了目标页面"
-        );
+        detail =
+            [NSString stringWithFormat:
+                @"原方法执行后\n\n%@",
+                detail];
     }
 
     /*
-     * 调用原始 viewDidAppear:
+     * UIAlertController 的 message
+     * 太长时会导致界面不好看。
+     *
+     * 这里最多显示 3500 字符。
      */
-    if (HBOriginalViewDidAppear) {
+    if (detail.length > 3500) {
 
-        HBOriginalViewDidAppear(
-            self,
-            _cmd
-        );
+        detail =
+            [detail substringToIndex:3500];
     }
+
+    dispatch_async(
+        dispatch_get_main_queue(),
+        ^{
+
+            @autoreleasepool {
+
+                UIViewController *vc =
+                    HBTopViewController();
+
+                if (!vc) {
+
+                    HBLog(
+                        @"无法找到当前 ViewController"
+                    );
+
+                    return;
+                }
+
+                UIAlertController *debugAlert =
+                    [UIAlertController
+                        alertControllerWithTitle:
+                            @"HB语音 · UIAlertController"
+                        message:detail
+                        preferredStyle:
+                            UIAlertControllerStyleAlert];
+
+                [debugAlert addAction:
+                    [UIAlertAction
+                        actionWithTitle:@"确定"
+                        style:
+                            UIAlertActionStyleDefault
+                        handler:nil]];
+
+                [vc presentViewController:
+                        debugAlert
+                    animated:YES
+                    completion:^{
+
+                    HBLog(
+                        @"UIAlertController 详细信息弹窗已显示"
+                    );
+                }];
+            }
+        }
+    );
 }
 
-#pragma mark - getNewVoiceServerList Hook
+#pragma mark - Hooked getNewVoiceServerList:
 
 static void HBHookedGetNewVoiceServerList(
     id self,
@@ -296,118 +302,203 @@ static void HBHookedGetNewVoiceServerList(
     );
 
     HBLog(
+        @"selector = %@",
+        NSStringFromSelector(_cmd)
+    );
+
+    HBLog(
         @"argument class = %@",
-        arg ? NSStringFromClass([arg class]) : @"nil"
-    );
-
-    HBLog(
-        @"argument = %@",
         arg
-    );
-
-    HBLog(
-        @"========================================"
+            ? NSStringFromClass([arg class])
+            : @"nil"
     );
 
     /*
-     * 第一次真正调用时弹窗
+     * 重点：
+     * 先分析原始参数。
      */
-    if (!HBMethodAlertShown) {
+    if ([arg isKindOfClass:
+            [UIAlertController class]]) {
 
-        HBMethodAlertShown = YES;
+        UIAlertController *alert =
+            (UIAlertController *)arg;
 
-        NSString *message =
-            [NSString stringWithFormat:
-                @"getNewVoiceServerList: 已被调用\n\n"
-                 "参数类型：%@\n\n"
-                 "参数：%@",
-                arg
-                    ? NSStringFromClass([arg class])
-                    : @"nil",
-                arg ? [NSString stringWithFormat:@"%@", arg]
-                    : @"nil"];
+        HBLog(
+            @"argument is UIAlertController"
+        );
 
-        if (message.length > 2500) {
-            message =
-                [message substringToIndex:2500];
+        HBLog(
+            @"UIAlertController title = %@",
+            alert.title
+        );
+
+        HBLog(
+            @"UIAlertController message = %@",
+            alert.message
+        );
+
+        HBLog(
+            @"UIAlertController actions = %lu",
+            (unsigned long)alert.actions.count
+        );
+
+        NSUInteger index = 0;
+
+        for (UIAlertAction *action
+             in alert.actions) {
+
+            HBLog(
+                @"Action[%lu] title = %@",
+                (unsigned long)index,
+                action.title
+            );
+
+            HBLog(
+                @"Action[%lu] style = %ld",
+                (unsigned long)index,
+                (long)action.style
+            );
+
+            index++;
         }
 
-        HBShowAlert(
-            @"HB语音方法调用",
-            message
+    } else {
+
+        HBLog(
+            @"argument is NOT UIAlertController"
+        );
+
+        HBLog(
+            @"argument description = %@",
+            HBSafeString(arg)
         );
     }
 
     /*
-     * 调用原方法
+     * 第一次调用时显示参数详细内容。
+     *
+     * 注意：
+     * 这里先不显示，等原方法执行之后，
+     * 我们再观察它有没有修改 UIAlertController。
+     */
+
+    /*
+     * 调用原始方法
      */
     if (HBOriginalGetNewVoiceServerList) {
+
+        HBLog(
+            @"Calling original IMP..."
+        );
 
         HBOriginalGetNewVoiceServerList(
             self,
             _cmd,
             arg
         );
-    }
-}
-
-#pragma mark - Install viewDidAppear Hook
-
-static BOOL InstallViewDidAppearHook(Class cls)
-{
-    if (HBViewHookInstalled) {
-        return YES;
-    }
-
-    SEL selector =
-        @selector(viewDidAppear:);
-
-    Method method =
-        class_getInstanceMethod(
-            cls,
-            selector
-        );
-
-    if (!method) {
 
         HBLog(
-            @"VoiceSelectController 没有 viewDidAppear:"
+            @"Original IMP returned"
+        );
+
+    } else {
+
+        HBLog(
+            @"ERROR: original IMP is NULL"
+        );
+    }
+
+    /*
+     * 原方法执行完成以后，
+     * 再读取一次 UIAlertController。
+     */
+    if ([arg isKindOfClass:
+            [UIAlertController class]]) {
+
+        UIAlertController *alert =
+            (UIAlertController *)arg;
+
+        HBLog(
+            @"========== AFTER ORIGINAL =========="
+        );
+
+        HBLog(
+            @"title = %@",
+            alert.title
+        );
+
+        HBLog(
+            @"message = %@",
+            alert.message
+        );
+
+        HBLog(
+            @"actions count = %lu",
+            (unsigned long)alert.actions.count
+        );
+
+        NSUInteger index = 0;
+
+        for (UIAlertAction *action
+             in alert.actions) {
+
+            HBLog(
+                @"AFTER Action[%lu] = %@",
+                (unsigned long)index,
+                action.title
+            );
+
+            index++;
+        }
+
+        HBLog(
+            @"===================================="
+        );
+
+        /*
+         * 在主线程显示详细结果。
+         */
+        HBShowAlertDetail(
+            alert,
+            YES
+        );
+    }
+
+    HBLog(
+        @"getNewVoiceServerList: FINISHED"
+    );
+
+    HBLog(
+        @"========================================"
+    );
+}
+
+#pragma mark - Install Hook
+
+static BOOL HookVoiceController(void)
+{
+    if (HBHookInstalled) {
+        return YES;
+    }
+
+    Class cls =
+        NSClassFromString(
+            @"VoiceSelectController"
+        );
+
+    if (!cls) {
+
+        HBLog(
+            @"VoiceSelectController not found"
         );
 
         return NO;
     }
 
-    IMP oldIMP =
-        method_getImplementation(method);
-
-    if (!oldIMP) {
-        return NO;
-    }
-
-    HBOriginalViewDidAppear =
-        (HBVoidFunc)oldIMP;
-
-    method_setImplementation(
-        method,
-        (IMP)HBHookedViewDidAppear
-    );
-
-    HBViewHookInstalled = YES;
-
     HBLog(
-        @"viewDidAppear: Hook 成功"
+        @"VoiceSelectController FOUND: %@",
+        cls
     );
-
-    return YES;
-}
-
-#pragma mark - Install getNewVoiceServerList Hook
-
-static BOOL InstallVoiceMethodHook(Class cls)
-{
-    if (HBMethodHookInstalled) {
-        return YES;
-    }
 
     SEL selector =
         NSSelectorFromString(
@@ -423,96 +514,95 @@ static BOOL InstallVoiceMethodHook(Class cls)
     if (!method) {
 
         HBLog(
-            @"getNewVoiceServerList: 不存在"
+            @"ERROR: getNewVoiceServerList: not found"
         );
 
         return NO;
     }
 
-    IMP oldIMP =
-        method_getImplementation(method);
-
-    if (!oldIMP) {
-        return NO;
-    }
-
-    HBOriginalGetNewVoiceServerList =
-        (HBVoiceOriginalFunc)oldIMP;
-
-    method_setImplementation(
-        method,
-        (IMP)HBHookedGetNewVoiceServerList
-    );
-
-    HBMethodHookInstalled = YES;
-
     HBLog(
-        @"getNewVoiceServerList: Hook 成功"
+        @"getNewVoiceServerList: FOUND"
     );
 
     /*
-     * 输出真实类型编码
+     * 输出原方法类型编码。
      */
     const char *types =
         method_getTypeEncoding(method);
 
     HBLog(
-        @"getNewVoiceServerList: type=%s",
+        @"Original type encoding = %s",
         types ? types : ""
+    );
+
+    IMP oldIMP =
+        method_getImplementation(method);
+
+    if (!oldIMP) {
+
+        HBLog(
+            @"ERROR: old IMP is NULL"
+        );
+
+        return NO;
+    }
+
+    /*
+     * 保存原始 IMP
+     */
+    HBOriginalGetNewVoiceServerList =
+        (HBVoiceOriginalFunc)oldIMP;
+
+    /*
+     * 替换 IMP
+     */
+    method_setImplementation(
+        method,
+        (IMP)HBHookedGetNewVoiceServerList
+    );
+
+    HBHookInstalled = YES;
+
+    HBLog(
+        @"========================================"
+    );
+
+    HBLog(
+        @"HOOK INSTALLED SUCCESSFULLY"
+    );
+
+    HBLog(
+        @"class = %@",
+        NSStringFromClass(cls)
+    );
+
+    HBLog(
+        @"selector = %@",
+        NSStringFromSelector(selector)
+    );
+
+    HBLog(
+        @"========================================"
     );
 
     return YES;
 }
 
-#pragma mark - Install All Hooks
+#pragma mark - Retry
 
-static void InstallHooks(void)
+static void HBTryInstallHook(void)
 {
-    Class cls =
-        NSClassFromString(
-            @"VoiceSelectController"
-        );
-
-    if (!cls) {
-
-        HBLog(
-            @"VoiceSelectController 尚未加载"
-        );
-
+    if (HBHookInstalled) {
         return;
     }
 
-    HBLog(
-        @"VoiceSelectController FOUND"
-    );
+    BOOL success =
+        HookVoiceController();
 
-    /*
-     * 第一次发现类时把方法全部列出来
-     */
-    HBDumpVoiceMethods(cls);
-
-    /*
-     * Hook 页面出现
-     */
-    InstallViewDidAppearHook(cls);
-
-    /*
-     * Hook 目标方法
-     */
-    InstallVoiceMethodHook(cls);
-}
-
-#pragma mark - Retry
-
-static void HBTryInstall(void)
-{
-    InstallHooks();
-
-    if (HBViewHookInstalled &&
-        HBMethodHookInstalled) {
+    if (success) {
 
         HBLog(
-            @"所有侦察 Hook 已安装"
+            @"Hook installation complete"
         );
 
         return;
@@ -525,7 +615,8 @@ static void HBTryInstall(void)
         ),
         dispatch_get_main_queue(),
         ^{
-            HBTryInstall();
+
+            HBTryInstallHook();
         }
     );
 }
@@ -542,11 +633,13 @@ static void VoiceRebuildInjectTest_Loaded(void)
         );
 
         NSLog(
-            @"[VoiceRebuild] DLL LOADED"
+            @"[VoiceRebuild] "
+            @"VoiceRebuildInjectTest LOADED"
         );
 
         NSLog(
-            @"[VoiceRebuild] 开始侦察 VoiceSelectController"
+            @"[VoiceRebuild] "
+            @"UIAlertController analysis enabled"
         );
 
         NSLog(
@@ -554,15 +647,14 @@ static void VoiceRebuildInjectTest_Loaded(void)
         );
 
         /*
-         * 立即开始检查。
-         *
-         * 不再等待 5 秒，
-         * 防止目标方法在前面已经调用过。
+         * 微信启动以后立即开始寻找
+         * VoiceSelectController。
          */
         dispatch_async(
             dispatch_get_main_queue(),
             ^{
-                HBTryInstall();
+
+                HBTryInstallHook();
             }
         );
     }
