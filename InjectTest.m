@@ -1,5 +1,6 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
+#import <objc/runtime.h>
 
 static void HBWriteLog(NSString *format, ...)
 {
@@ -41,82 +42,67 @@ static void HBWriteLog(NSString *format, ...)
     NSLog(@"[HBInjectTest] %@", message);
 }
 
-static UIViewController *HBTopViewController(UIViewController *root)
+static void HBHookViewDidAppear(void)
 {
-    if (!root)
-        return nil;
+    Class cls = [UIViewController class];
 
-    if (root.presentedViewController)
+    SEL sel = @selector(viewDidAppear:);
+
+    Method method =
+        class_getInstanceMethod(cls, sel);
+
+    if (!method)
     {
-        return HBTopViewController(root.presentedViewController);
-    }
-
-    if ([root isKindOfClass:[UINavigationController class]])
-    {
-        UINavigationController *nav =
-            (UINavigationController *)root;
-
-        return HBTopViewController(nav.visibleViewController);
-    }
-
-    if ([root isKindOfClass:[UITabBarController class]])
-    {
-        UITabBarController *tab =
-            (UITabBarController *)root;
-
-        return HBTopViewController(tab.selectedViewController);
-    }
-
-    return root;
-}
-
-static void HBScanCurrentUI(void)
-{
-    HBWriteLog(@"========================================");
-    HBWriteLog(@"CURRENT UI SCAN");
-
-    UIApplication *app =
-        [UIApplication sharedApplication];
-
-    if (!app)
-    {
-        HBWriteLog(@"UIApplication unavailable");
+        HBWriteLog(@"viewDidAppear method not found");
         return;
     }
 
-    for (UIWindow *window in app.windows)
-    {
-        if (!window)
-            continue;
+    IMP originalIMP =
+        method_getImplementation(method);
 
-        if (window.hidden)
-            continue;
+    static IMP savedOriginalIMP = NULL;
 
-        if (window.alpha <= 0.01)
-            continue;
+    savedOriginalIMP = originalIMP;
 
-        UIViewController *root =
-            window.rootViewController;
+    IMP newIMP =
+        imp_implementationWithBlock(
+            ^(UIViewController *self,
+              BOOL animated)
+            {
+                /*
+                 * 先执行系统原来的 viewDidAppear
+                 */
+                ((void (*)(id, SEL, BOOL))
+                 savedOriginalIMP)(
+                    self,
+                    sel,
+                    animated
+                );
 
-        if (!root)
-            continue;
+                /*
+                 * 只记录真正出现的页面
+                 */
+                NSString *className =
+                    NSStringFromClass([self class]);
 
-        UIViewController *top =
-            HBTopViewController(root);
+                NSString *title =
+                    self.navigationItem.title;
 
-        if (!top)
-            continue;
-
-        HBWriteLog(
-            @"WINDOW=%p ROOT=%@ TOP=%@",
-            window,
-            NSStringFromClass([root class]),
-            NSStringFromClass([top class])
+                HBWriteLog(
+                    @"VIEW APPEAR: %@ | TITLE=%@ | NAV=%@",
+                    className,
+                    title ?: @"<nil>",
+                    self.navigationController
+                    ? NSStringFromClass(
+                        [self.navigationController class])
+                    : @"<nil>"
+                );
+            }
         );
-    }
 
-    HBWriteLog(@"END CURRENT UI SCAN");
-    HBWriteLog(@"========================================");
+    method_setImplementation(method, newIMP);
+
+    HBWriteLog(@"UIViewController viewDidAppear hooked");
 }
 
 __attribute__((constructor))
@@ -126,18 +112,16 @@ static void HBInjectTestInit(void)
     {
         HBWriteLog(@"========================================");
         HBWriteLog(@"INJECT TEST START");
-        HBWriteLog(@"SAFE UI SCANNER");
+        HBWriteLog(@"VIEW APPEAR LOGGER");
         HBWriteLog(@"PID = %d", getpid());
         HBWriteLog(@"PROCESS = %@",
                    [[NSProcessInfo processInfo] processName]);
         HBWriteLog(@"========================================");
 
-        dispatch_after(
-            dispatch_time(DISPATCH_TIME_NOW,
-                          (int64_t)(8 * NSEC_PER_SEC)),
+        dispatch_async(
             dispatch_get_main_queue(),
             ^{
-                HBScanCurrentUI();
+                HBHookViewDidAppear();
             }
         );
     }
