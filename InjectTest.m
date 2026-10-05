@@ -2,58 +2,144 @@
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 
-#pragma mark - HB Voice Hook
+#pragma mark - Global
 
-static BOOL HBVoiceHookInstalled = NO;
+typedef void (*HBVoiceOriginalFunc)(id, SEL, id);
 
-#pragma mark - 打印 UIAlertController 内容
+static HBVoiceOriginalFunc HBOriginalGetNewVoiceServerList = NULL;
+static BOOL HBHookInstalled = NO;
 
-static void HBLogAlertController(id obj, NSString *prefix) {
+#pragma mark - Log Object
 
-    if (!obj) {
-        NSLog(@"[VoiceRebuild] %@ = nil", prefix);
+static void HBLogObject(id obj, NSString *name) {
+
+    if (obj == nil) {
+
+        NSLog(
+            @"[VoiceRebuild] %@ = nil",
+            name
+        );
+
         return;
     }
 
-    NSLog(@"[VoiceRebuild] %@ class = %@",
-          prefix,
-          NSStringFromClass([obj class]));
+    NSLog(
+        @"[VoiceRebuild] %@ class = %@",
+        name,
+        NSStringFromClass([obj class])
+    );
 
-    NSLog(@"[VoiceRebuild] %@ description = %@",
-          prefix,
-          obj);
+    NSLog(
+        @"[VoiceRebuild] %@ = %@",
+        name,
+        obj
+    );
 
     if ([obj isKindOfClass:[UIAlertController class]]) {
 
         UIAlertController *alert =
             (UIAlertController *)obj;
 
-        NSLog(@"[VoiceRebuild] %@ title = %@",
-              prefix,
-              alert.title);
+        NSLog(
+            @"[VoiceRebuild] %@ title = %@",
+            name,
+            alert.title
+        );
 
-        NSLog(@"[VoiceRebuild] %@ message = %@",
-              prefix,
-              alert.message);
+        NSLog(
+            @"[VoiceRebuild] %@ message = %@",
+            name,
+            alert.message
+        );
 
-        NSLog(@"[VoiceRebuild] %@ actions count = %lu",
-              prefix,
-              (unsigned long)alert.actions.count);
+        NSLog(
+            @"[VoiceRebuild] %@ actions = %lu",
+            name,
+            (unsigned long)alert.actions.count
+        );
 
         for (UIAlertAction *action in alert.actions) {
 
-            NSLog(@"[VoiceRebuild] %@ action = %@",
-                  prefix,
-                  action.title);
+            NSLog(
+                @"[VoiceRebuild] %@ action = %@",
+                name,
+                action.title
+            );
         }
     }
 }
 
-#pragma mark - Hook VoiceSelectController
+#pragma mark - Hook Function
+
+static void HBHookedGetNewVoiceServerList(
+    id self,
+    SEL _cmd,
+    id arg
+) {
+
+    NSLog(
+        @"[VoiceRebuild] ========================================"
+    );
+
+    NSLog(
+        @"[VoiceRebuild] getNewVoiceServerList: CALLED"
+    );
+
+    NSLog(
+        @"[VoiceRebuild] self = %@",
+        self
+    );
+
+    NSLog(
+        @"[VoiceRebuild] self class = %@",
+        NSStringFromClass([self class])
+    );
+
+    HBLogObject(
+        arg,
+        @"ARGUMENT BEFORE"
+    );
+
+    /*
+     * 调用 HB 原来的实现
+     */
+    if (HBOriginalGetNewVoiceServerList != NULL) {
+
+        HBOriginalGetNewVoiceServerList(
+            self,
+            _cmd,
+            arg
+        );
+
+    } else {
+
+        NSLog(
+            @"[VoiceRebuild] ERROR: original IMP is NULL"
+        );
+    }
+
+    /*
+     * 原方法执行以后再次读取
+     */
+    HBLogObject(
+        arg,
+        @"ARGUMENT AFTER"
+    );
+
+    NSLog(
+        @"[VoiceRebuild] getNewVoiceServerList: FINISHED"
+    );
+
+    NSLog(
+        @"[VoiceRebuild] ========================================"
+    );
+}
+
+#pragma mark - Install Hook
 
 static void HookVoiceController(void) {
 
-    if (HBVoiceHookInstalled) {
+    if (HBHookInstalled) {
 
         NSLog(
             @"[VoiceRebuild] Hook already installed"
@@ -63,154 +149,121 @@ static void HookVoiceController(void) {
     }
 
     Class cls =
-        NSClassFromString(@"VoiceSelectController");
+        NSClassFromString(
+            @"VoiceSelectController"
+        );
 
-    if (!cls) {
+    if (cls == Nil) {
 
         NSLog(
-            @"[VoiceRebuild] ❌ VoiceSelectController not found"
+            @"[VoiceRebuild] ERROR: "
+            @"VoiceSelectController not found"
         );
 
         return;
     }
 
     NSLog(
-        @"[VoiceRebuild] ✅ VoiceSelectController found: %@",
+        @"[VoiceRebuild] VoiceSelectController FOUND: %@",
         cls
     );
 
-    SEL sel =
+    SEL selector =
         NSSelectorFromString(
             @"getNewVoiceServerList:"
         );
 
     Method method =
-        class_getInstanceMethod(cls, sel);
+        class_getInstanceMethod(
+            cls,
+            selector
+        );
 
-    if (!method) {
+    if (method == NULL) {
 
         NSLog(
-            @"[VoiceRebuild] ❌ getNewVoiceServerList: not found"
+            @"[VoiceRebuild] ERROR: "
+            @"getNewVoiceServerList: not found"
         );
 
         return;
     }
 
     NSLog(
-        @"[VoiceRebuild] ✅ getNewVoiceServerList: found"
+        @"[VoiceRebuild] "
+        @"getNewVoiceServerList: FOUND"
     );
 
     IMP oldIMP =
-        method_getImplementation(method);
-
-    typedef void (*VoiceFunc)(
-        id,
-        SEL,
-        id
-    );
-
-    VoiceFunc original =
-        (VoiceFunc)oldIMP;
-
-    IMP newIMP =
-        imp_implementationWithBlock(
-            ^void(id self, id arg) {
-
-                NSLog(
-                    @"[VoiceRebuild] "
-                    @"========================================"
-                );
-
-                NSLog(
-                    @"[VoiceRebuild] "
-                    @"getNewVoiceServerList: CALLED"
-                );
-
-                NSLog(
-                    @"[VoiceRebuild] self = %@",
-                    self
-                );
-
-                NSLog(
-                    @"[VoiceRebuild] self class = %@",
-                    NSStringFromClass([self class])
-                );
-
-                HBLogAlertController(
-                    arg,
-                    @"BEFORE"
-                );
-
-                /*
-                 * 执行 HB 原来的方法
-                 */
-                original(
-                    self,
-                    sel,
-                    arg
-                );
-
-                /*
-                 * 原方法执行完成以后
-                 * 再次读取参数。
-                 *
-                 * 如果 HB 是通过传入的 UIAlertController
-                 * 修改提示内容，这里就可以看到结果。
-                 */
-                HBLogAlertController(
-                    arg,
-                    @"AFTER"
-                );
-
-                NSLog(
-                    @"[VoiceRebuild] "
-                    @"========================================"
-                );
-            }
+        method_getImplementation(
+            method
         );
+
+    if (oldIMP == NULL) {
+
+        NSLog(
+            @"[VoiceRebuild] ERROR: old IMP is NULL"
+        );
+
+        return;
+    }
+
+    HBOriginalGetNewVoiceServerList =
+        (HBVoiceOriginalFunc)oldIMP;
 
     method_setImplementation(
         method,
-        newIMP
+        (IMP)HBHookedGetNewVoiceServerList
     );
 
-    HBVoiceHookInstalled = YES;
+    HBHookInstalled = YES;
 
     NSLog(
-        @"[VoiceRebuild] "
-        @"✅ Hook installed successfully!"
+        @"[VoiceRebuild] ========================================"
+    );
+
+    NSLog(
+        @"[VoiceRebuild] HOOK INSTALLED SUCCESSFULLY"
+    );
+
+    NSLog(
+        @"[VoiceRebuild] class = %@",
+        cls
+    );
+
+    NSLog(
+        @"[VoiceRebuild] selector = %@",
+        NSStringFromSelector(selector)
+    );
+
+    NSLog(
+        @"[VoiceRebuild] ========================================"
     );
 }
 
-#pragma mark - 等待 HB 初始化
+#pragma mark - Delayed Start
 
-static void StartVoiceHookSearch(void) {
+static void StartVoiceHook(void) {
 
     NSLog(
-        @"[VoiceRebuild] "
-        @"开始寻找 VoiceSelectController..."
+        @"[VoiceRebuild] Waiting for HB initialization..."
     );
 
     /*
-     * HB 可能不是马上完成初始化。
-     *
-     * 每 2 秒检查一次。
-     * 最多检查 30 次。
+     * 不使用递归 Block。
+     * 直接延迟 5 秒检查一次。
      */
-
-    __block int count = 0;
-
-    dispatch_queue_t queue =
-        dispatch_get_main_queue();
-
-    void (^checkBlock)(void) =
+    dispatch_after(
+        dispatch_time(
+            DISPATCH_TIME_NOW,
+            5 * NSEC_PER_SEC
+        ),
+        dispatch_get_main_queue(),
         ^{
-            count++;
 
             NSLog(
-                @"[VoiceRebuild] "
-                @"检查 VoiceSelectController (%d/30)",
-                count
+                @"[VoiceRebuild] Checking "
+                @"VoiceSelectController..."
             );
 
             Class cls =
@@ -218,37 +271,42 @@ static void StartVoiceHookSearch(void) {
                     @"VoiceSelectController"
                 );
 
-            if (cls) {
-
-                HookVoiceController();
-
-                return;
-            }
-
-            if (count >= 30) {
+            if (cls != Nil) {
 
                 NSLog(
                     @"[VoiceRebuild] "
-                    @"❌ 等待超时，仍未找到 VoiceSelectController"
+                    @"VoiceSelectController is ready"
                 );
 
-                return;
+                HookVoiceController();
+
+            } else {
+
+                NSLog(
+                    @"[VoiceRebuild] "
+                    @"VoiceSelectController not ready yet"
+                );
+
+                /*
+                 * 再等 5 秒。
+                 */
+                dispatch_after(
+                    dispatch_time(
+                        DISPATCH_TIME_NOW,
+                        5 * NSEC_PER_SEC
+                    ),
+                    dispatch_get_main_queue(),
+                    ^{
+
+                        HookVoiceController();
+                    }
+                );
             }
-
-            dispatch_after(
-                dispatch_time(
-                    DISPATCH_TIME_NOW,
-                    2 * NSEC_PER_SEC
-                ),
-                queue,
-                checkBlock
-            );
-        };
-
-    checkBlock();
+        }
+    );
 }
 
-#pragma mark - 插件加载
+#pragma mark - Constructor
 
 __attribute__((constructor))
 static void VoiceRebuildInjectTest_Loaded(void) {
@@ -256,42 +314,25 @@ static void VoiceRebuildInjectTest_Loaded(void) {
     @autoreleasepool {
 
         NSLog(
-            @"[VoiceRebuild] "
-            @"========================================"
+            @"[VoiceRebuild] ========================================"
         );
 
         NSLog(
-            @"[VoiceRebuild] "
-            @"VoiceRebuild loaded successfully"
+            @"[VoiceRebuild] VoiceRebuild loaded successfully"
         );
 
         NSLog(
-            @"[VoiceRebuild] "
-            @"不再创建任何调试窗口"
+            @"[VoiceRebuild] Debug window: DISABLED"
         );
 
         NSLog(
-            @"[VoiceRebuild] "
-            @"不再显示 UIAlertController"
+            @"[VoiceRebuild] UIAlertController: DISABLED"
         );
 
         NSLog(
-            @"[VoiceRebuild] "
-            @"========================================"
+            @"[VoiceRebuild] ========================================"
         );
 
-        /*
-         * 等待微信 / HB 初始化
-         */
-        dispatch_after(
-            dispatch_time(
-                DISPATCH_TIME_NOW,
-                3 * NSEC_PER_SEC
-            ),
-            dispatch_get_main_queue(),
-            ^{
-                StartVoiceHookSearch();
-            }
-        );
+        StartVoiceHook();
     }
 }
