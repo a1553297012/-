@@ -1,6 +1,5 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
-#import <objc/runtime.h>
 
 static void HBWriteLog(NSString *format, ...)
 {
@@ -13,7 +12,8 @@ static void HBWriteLog(NSString *format, ...)
     va_end(args);
 
     NSString *path =
-        [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/HBInjectTest.log"];
+        [NSHomeDirectory()
+         stringByAppendingPathComponent:@"Documents/HBInjectTest.log"];
 
     NSString *line =
         [NSString stringWithFormat:@"[%@] %@\n",
@@ -26,7 +26,8 @@ static void HBWriteLog(NSString *format, ...)
     if (file)
     {
         [file seekToEndOfFile];
-        [file writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
+        [file writeData:
+         [line dataUsingEncoding:NSUTF8StringEncoding]];
         [file closeFile];
     }
     else
@@ -40,66 +41,81 @@ static void HBWriteLog(NSString *format, ...)
     NSLog(@"[HBInjectTest] %@", message);
 }
 
-static void HBScanViewControllers(void)
+static UIViewController *HBTopViewController(UIViewController *root)
 {
-    HBWriteLog(@"========================================");
-    HBWriteLog(@"START VIEW CONTROLLER SCAN");
-    HBWriteLog(@"THIS IS THE NEW SCANNER");
+    if (!root)
+        return nil;
 
-    int count = objc_getClassList(NULL, 0);
-
-    HBWriteLog(@"Objective-C class count = %d", count);
-
-    if (count <= 0)
-        return;
-
-    Class *classes =
-        (__unsafe_unretained Class *)malloc(sizeof(Class) * count);
-
-    int actualCount =
-        objc_getClassList(classes, count);
-
-    for (int i = 0; i < actualCount; i++)
+    if (root.presentedViewController)
     {
-        Class cls = classes[i];
-
-        if (!cls)
-            continue;
-
-        NSString *name = NSStringFromClass(cls);
-
-        if (!name)
-            continue;
-
-        BOOL nameMatched =
-            [name rangeOfString:@"Setting"
-                         options:NSCaseInsensitiveSearch].location != NSNotFound ||
-            [name rangeOfString:@"More"
-                         options:NSCaseInsensitiveSearch].location != NSNotFound ||
-            [name rangeOfString:@"Profile"
-                         options:NSCaseInsensitiveSearch].location != NSNotFound ||
-            [name rangeOfString:@"Config"
-                         options:NSCaseInsensitiveSearch].location != NSNotFound;
-
-        if (!nameMatched)
-            continue;
-
-        if (![cls isSubclassOfClass:[UIViewController class]])
-            continue;
-
-        Class superClass = class_getSuperclass(cls);
-
-        NSString *superName =
-            superClass ? NSStringFromClass(superClass) : @"<none>";
-
-        HBWriteLog(@"CONTROLLER: %@ | SUPER: %@",
-                   name,
-                   superName);
+        return HBTopViewController(root.presentedViewController);
     }
 
-    free(classes);
+    if ([root isKindOfClass:[UINavigationController class]])
+    {
+        UINavigationController *nav =
+            (UINavigationController *)root;
 
-    HBWriteLog(@"END VIEW CONTROLLER SCAN");
+        return HBTopViewController(nav.visibleViewController);
+    }
+
+    if ([root isKindOfClass:[UITabBarController class]])
+    {
+        UITabBarController *tab =
+            (UITabBarController *)root;
+
+        return HBTopViewController(tab.selectedViewController);
+    }
+
+    return root;
+}
+
+static void HBScanCurrentUI(void)
+{
+    HBWriteLog(@"========================================");
+    HBWriteLog(@"CURRENT UI SCAN");
+
+    UIApplication *app =
+        [UIApplication sharedApplication];
+
+    if (!app)
+    {
+        HBWriteLog(@"UIApplication unavailable");
+        return;
+    }
+
+    for (UIWindow *window in app.windows)
+    {
+        if (!window)
+            continue;
+
+        if (window.hidden)
+            continue;
+
+        if (window.alpha <= 0.01)
+            continue;
+
+        UIViewController *root =
+            window.rootViewController;
+
+        if (!root)
+            continue;
+
+        UIViewController *top =
+            HBTopViewController(root);
+
+        if (!top)
+            continue;
+
+        HBWriteLog(
+            @"WINDOW=%p ROOT=%@ TOP=%@",
+            window,
+            NSStringFromClass([root class]),
+            NSStringFromClass([top class])
+        );
+    }
+
+    HBWriteLog(@"END CURRENT UI SCAN");
     HBWriteLog(@"========================================");
 }
 
@@ -110,7 +126,7 @@ static void HBInjectTestInit(void)
     {
         HBWriteLog(@"========================================");
         HBWriteLog(@"INJECT TEST START");
-        HBWriteLog(@"NEW VERSION 2026-10-05-NEW-SCANNER");
+        HBWriteLog(@"SAFE UI SCANNER");
         HBWriteLog(@"PID = %d", getpid());
         HBWriteLog(@"PROCESS = %@",
                    [[NSProcessInfo processInfo] processName]);
@@ -118,10 +134,11 @@ static void HBInjectTestInit(void)
 
         dispatch_after(
             dispatch_time(DISPATCH_TIME_NOW,
-                          (int64_t)(5 * NSEC_PER_SEC)),
+                          (int64_t)(8 * NSEC_PER_SEC)),
             dispatch_get_main_queue(),
             ^{
-                HBScanViewControllers();
-            });
+                HBScanCurrentUI();
+            }
+        );
     }
 }
