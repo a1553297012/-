@@ -78,8 +78,7 @@ static void HBWriteLog(NSString *text) {
             [handle seekToEndOfFile];
 
             NSData *data =
-                [line dataUsingEncoding:
-                    NSUTF8StringEncoding];
+                [line dataUsingEncoding:NSUTF8StringEncoding];
 
             [handle writeData:data];
 
@@ -97,6 +96,57 @@ static void HBWriteLog(NSString *text) {
             } @catch (...) {
             }
         }
+    }
+}
+
+#pragma mark - Object Description
+
+static void HBLogObject(
+    id object,
+    NSString *prefix
+) {
+
+    if (!object) {
+
+        HBWriteLog(
+            [NSString stringWithFormat:
+                @"%@ = nil",
+                prefix]
+        );
+
+        return;
+    }
+
+    HBWriteLog(
+        [NSString stringWithFormat:
+            @"%@ class = %@",
+            prefix,
+            NSStringFromClass([object class])]
+    );
+
+    HBWriteLog(
+        [NSString stringWithFormat:
+            @"%@ address = %p",
+            prefix,
+            object]
+    );
+
+    @try {
+
+        HBWriteLog(
+            [NSString stringWithFormat:
+                @"%@ description = %@",
+                prefix,
+                object]
+        );
+
+    } @catch (...) {
+
+        HBWriteLog(
+            [NSString stringWithFormat:
+                @"%@ description = <exception>",
+                prefix]
+        );
     }
 }
 
@@ -218,32 +268,52 @@ static void HBLogClassInformation(Class cls) {
         );
     }
 
+    SEL selector =
+        NSSelectorFromString(
+            @"getNewVoiceServerList:"
+        );
+
     Method method =
         class_getInstanceMethod(
             cls,
-            @selector(getNewVoiceServerList:)
+            selector
         );
 
-    if (method) {
-
-        const char *encoding =
-            method_getTypeEncoding(method);
-
-        unsigned int argumentCount =
-            method_getNumberOfArguments(method);
+    if (!method) {
 
         HBWriteLog(
-            [NSString stringWithFormat:
-                @"METHOD TYPE ENCODING = %s",
-                encoding ? encoding : "(null)"]
+            @"METHOD getNewVoiceServerList: = NOT FOUND"
         );
 
-        HBWriteLog(
-            [NSString stringWithFormat:
-                @"METHOD ARGUMENT COUNT = %u",
-                argumentCount]
-        );
+        return;
     }
+
+    const char *encoding =
+        method_getTypeEncoding(method);
+
+    unsigned int argumentCount =
+        method_getNumberOfArguments(method);
+
+    IMP implementation =
+        method_getImplementation(method);
+
+    HBWriteLog(
+        [NSString stringWithFormat:
+            @"METHOD TYPE ENCODING = %s",
+            encoding ? encoding : "(null)"]
+    );
+
+    HBWriteLog(
+        [NSString stringWithFormat:
+            @"METHOD ARGUMENT COUNT = %u",
+            argumentCount]
+    );
+
+    HBWriteLog(
+        [NSString stringWithFormat:
+            @"METHOD IMP = %p",
+            implementation]
+    );
 }
 
 #pragma mark - Stack Trace
@@ -270,9 +340,6 @@ static void HBLogStackTrace(void) {
 
         index++;
 
-        /*
-         * 不需要把几百行全部记录下来。
-         */
         if (index >= 20) {
             break;
         }
@@ -293,17 +360,9 @@ static void HBHookedGetNewVoiceServerList(
 
     @autoreleasepool {
 
-        HBWriteLog(
-            @""
-        );
-
-        HBWriteLog(
-            @"########################################"
-        );
-
-        HBWriteLog(
-            @"getNewVoiceServerList: ENTER"
-        );
+        HBWriteLog(@"");
+        HBWriteLog(@"########################################");
+        HBWriteLog(@"getNewVoiceServerList: ENTER");
 
         HBWriteLog(
             [NSString stringWithFormat:
@@ -324,27 +383,14 @@ static void HBHookedGetNewVoiceServerList(
         );
 
         /*
-         * 记录参数
+         * 参数信息
          */
 
         if (arg) {
 
-            HBWriteLog(
-                [NSString stringWithFormat:
-                    @"ARGUMENT class = %@",
-                    NSStringFromClass([arg class])]
-            );
-
-            HBWriteLog(
-                [NSString stringWithFormat:
-                    @"ARGUMENT address = %p",
-                    arg]
-            );
-
-            HBWriteLog(
-                [NSString stringWithFormat:
-                    @"ARGUMENT description = %@",
-                    arg]
+            HBLogObject(
+                arg,
+                @"ARGUMENT"
             );
 
         } else {
@@ -356,7 +402,7 @@ static void HBHookedGetNewVoiceServerList(
 
         /*
          * 如果参数是 UIAlertController，
-         * 详细记录它。
+         * 这里只观察，不修改。
          */
 
         if ([arg isKindOfClass:
@@ -375,16 +421,15 @@ static void HBHookedGetNewVoiceServerList(
         HBLogStackTrace();
 
         /*
-         * ====================================
-         * 关键部分
-         * ====================================
+         * ========================================
+         * 调用真正的原始 IMP
+         * ========================================
          *
-         * 这一次恢复调用原始方法。
-         *
-         * 所以不会像上一版一样卡在：
-         *
-         *     正在获取...
-         *
+         * 不改变参数。
+         * 不拦截。
+         * 不创建弹窗。
+         * 不关闭弹窗。
+         * 不修改返回结果。
          */
 
         HBWriteLog(
@@ -411,10 +456,8 @@ static void HBHookedGetNewVoiceServerList(
         }
 
         /*
-         * 原方法返回以后，再记录一次参数。
-         *
-         * 如果 UIAlertController 内容发生变化，
-         * 这里可以看到。
+         * 原方法结束以后，
+         * 再观察一次参数。
          */
 
         if ([arg isKindOfClass:
@@ -434,9 +477,7 @@ static void HBHookedGetNewVoiceServerList(
             @"########################################"
         );
 
-        HBWriteLog(
-            @""
-        );
+        HBWriteLog(@"");
     }
 }
 
@@ -452,6 +493,10 @@ static void HookVoiceController(void) {
 
         return;
     }
+
+    HBWriteLog(
+        @"Searching VoiceSelectController..."
+    );
 
     Class cls =
         NSClassFromString(
@@ -503,6 +548,9 @@ static void HookVoiceController(void) {
     unsigned int argumentCount =
         method_getNumberOfArguments(method);
 
+    IMP oldIMP =
+        method_getImplementation(method);
+
     HBWriteLog(
         [NSString stringWithFormat:
             @"type encoding = %s",
@@ -515,16 +563,22 @@ static void HookVoiceController(void) {
             argumentCount]
     );
 
+    HBWriteLog(
+        [NSString stringWithFormat:
+            @"old IMP = %p",
+            oldIMP]
+    );
+
     /*
-     * 当前我们已经验证过这个 Hook 能正常进入。
-     *
-     * 正常 Objective-C：
+     * Objective-C 方法：
      *
      * 0 = self
      * 1 = _cmd
      * 2 = arg
      *
-     * 所以这里应该是 3。
+     * 所以：
+     *
+     * argumentCount = 3
      */
 
     if (argumentCount != 3) {
@@ -534,14 +588,11 @@ static void HookVoiceController(void) {
         );
 
         HBWriteLog(
-            @"Hook aborted"
+            @"HOOK ABORTED"
         );
 
         return;
     }
-
-    IMP oldIMP =
-        method_getImplementation(method);
 
     if (!oldIMP) {
 
@@ -552,6 +603,10 @@ static void HookVoiceController(void) {
         return;
     }
 
+    /*
+     * 保存原始 IMP
+     */
+
     HBOriginalGetNewVoiceServerList =
         (HBVoiceOriginalFunc)oldIMP;
 
@@ -559,41 +614,96 @@ static void HookVoiceController(void) {
         @"Original IMP saved"
     );
 
+    /*
+     * 安装 Hook
+     */
+
     method_setImplementation(
         method,
         (IMP)HBHookedGetNewVoiceServerList
     );
 
-    HBHookInstalled = YES;
+    /*
+     * 验证
+     */
 
-    HBWriteLog(
-        @"========================================"
-    );
-
-    HBWriteLog(
-        @"HOOK INSTALLED SUCCESSFULLY"
-    );
+    IMP currentIMP =
+        method_getImplementation(method);
 
     HBWriteLog(
         [NSString stringWithFormat:
-            @"class = %@",
-            NSStringFromClass(cls)]
+            @"new IMP = %p",
+            currentIMP]
     );
 
-    HBWriteLog(
-        [NSString stringWithFormat:
-            @"selector = %@",
-            NSStringFromSelector(selector)]
-    );
+    if (currentIMP ==
+        (IMP)HBHookedGetNewVoiceServerList) {
+
+        HBHookInstalled = YES;
+
+        HBWriteLog(
+            @"========================================"
+        );
+
+        HBWriteLog(
+            @"HOOK INSTALLED SUCCESSFULLY"
+        );
+
+        HBWriteLog(
+            [NSString stringWithFormat:
+                @"class = %@",
+                NSStringFromClass(cls)]
+        );
+
+        HBWriteLog(
+            [NSString stringWithFormat:
+                @"selector = %@",
+                NSStringFromSelector(selector)]
+        );
+
+        HBWriteLog(
+            [NSString stringWithFormat:
+                @"encoding = %s",
+                typeEncoding ? typeEncoding : "(null)"]
+        );
+
+        HBWriteLog(
+            @"========================================"
+        );
+
+    } else {
+
+        HBWriteLog(
+            @"ERROR: Hook verification failed"
+        );
+    }
+}
+
+#pragma mark - Retry
+
+static void HBTryInstallHook(void) {
+
+    if (HBHookInstalled) {
+        return;
+    }
 
     HBWriteLog(
-        [NSString stringWithFormat:
-            @"encoding = %s",
-            typeEncoding ? typeEncoding : "(null)"]
+        @"Trying to install VoiceSelectController hook..."
     );
 
+    HookVoiceController();
+
+    if (HBHookInstalled) {
+
+        HBWriteLog(
+            @"Hook installation completed"
+        );
+
+        return;
+    }
+
     HBWriteLog(
-        @"========================================"
+        @"Hook not installed yet"
     );
 }
 
@@ -606,15 +716,19 @@ static void StartVoiceHook(void) {
     );
 
     HBWriteLog(
-        @"VoiceRebuildInjectTest LOADED"
+        @"VoiceRebuildInjectTest START"
     );
 
     HBWriteLog(
-        @"NORMAL MODE"
+        @"MODE = OBSERVE ONLY"
     );
 
     HBWriteLog(
-        @"NO ALERT"
+        @"NO DEBUG ALERT"
+    );
+
+    HBWriteLog(
+        @"NO ALERT MODIFICATION"
     );
 
     HBWriteLog(
@@ -631,6 +745,11 @@ static void StartVoiceHook(void) {
         @"========================================"
     );
 
+    /*
+     * 第一次：
+     * 等待目标类加载。
+     */
+
     dispatch_after(
         dispatch_time(
             DISPATCH_TIME_NOW,
@@ -643,13 +762,13 @@ static void StartVoiceHook(void) {
                 @"First hook attempt"
             );
 
-            HookVoiceController();
+            HBTryInstallHook();
+
+            /*
+             * 第二次尝试
+             */
 
             if (!HBHookInstalled) {
-
-                HBWriteLog(
-                    @"First attempt failed"
-                );
 
                 dispatch_after(
                     dispatch_time(
@@ -663,7 +782,30 @@ static void StartVoiceHook(void) {
                             @"Second hook attempt"
                         );
 
-                        HookVoiceController();
+                        HBTryInstallHook();
+
+                        /*
+                         * 第三次尝试
+                         */
+
+                        if (!HBHookInstalled) {
+
+                            dispatch_after(
+                                dispatch_time(
+                                    DISPATCH_TIME_NOW,
+                                    10 * NSEC_PER_SEC
+                                ),
+                                dispatch_get_main_queue(),
+                                ^{
+
+                                    HBWriteLog(
+                                        @"Third hook attempt"
+                                    );
+
+                                    HBTryInstallHook();
+                                }
+                            );
+                        }
                     }
                 );
             }
@@ -688,6 +830,22 @@ static void VoiceRebuildInjectTest_Loaded(void) {
 
         HBWriteLog(
             @"VoiceRebuildInjectTest loaded successfully"
+        );
+
+        HBWriteLog(
+            @"Observe-only mode"
+        );
+
+        HBWriteLog(
+            @"No UIAlertController created"
+        );
+
+        HBWriteLog(
+            @"No UIAlertController dismissed"
+        );
+
+        HBWriteLog(
+            @"No original method blocked"
         );
 
         HBWriteLog(
