@@ -1,6 +1,10 @@
 name: Build VoiceBridgeProbe
 
 on:
+  push:
+    branches:
+      - main
+
   workflow_dispatch:
 
 jobs:
@@ -11,161 +15,84 @@ jobs:
       - name: Checkout project
         uses: actions/checkout@v4
 
-      - name: Install dependencies
+      - name: Show Xcode version
         run: |
-          brew update
-          brew install make ldid-procursus
-
-      - name: Install Theos
-        run: |
-          rm -rf "$HOME/theos"
-          git clone --recursive https://github.com/theos/theos.git "$HOME/theos"
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-path
 
       - name: Build dylib
-        run: |
-          export THEOS="$HOME/theos"
-
-          echo "=== THEOS ==="
-          echo "$THEOS"
-
-          echo "=== MAKEFILE ==="
-          cat Makefile
-
-          echo "=== BUILD ==="
-          make clean || true
-          make
-
-      - name: Find and verify dylib
+        shell: bash
         run: |
           set -e
 
-          echo "================================"
-          echo "SEARCHING ALL DYLIB FILES"
-          echo "================================"
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
 
-          find .theos -type f -name "*.dylib" -print
+          rm -rf build
+          mkdir -p build
 
-          echo "================================"
-          echo "SEARCHING REAL VOICEBRIDGEPROBE"
-          echo "================================"
+          clang \
+            -dynamiclib \
+            -arch arm64 \
+            -isysroot "$SDK" \
+            -miphoneos-version-min=15.0 \
+            -fobjc-arc \
+            -fobjc-runtime=ios-15.0 \
+            -O2 \
+            -Wall \
+            -Wextra \
+            -framework Foundation \
+            -framework UIKit \
+            InjectTest.m \
+            -o build/VoiceBridgeProbe.dylib
 
-          DYLIBS=$(find .theos -type f \
-            -name "VoiceBridgeProbe.dylib" \
-            -not -path "*/.dSYM/*" \
-            -not -path "*/dSYM/*")
-
-          echo "$DYLIBS"
-
-          COUNT=$(echo "$DYLIBS" | grep -c "VoiceBridgeProbe.dylib" || true)
-
-          if [ "$COUNT" -eq 0 ]; then
-            echo "ERROR: No VoiceBridgeProbe.dylib found"
-            exit 1
-          fi
-
-          DYLIB=$(echo "$DYLIBS" | head -n 1)
-
-          echo "================================"
-          echo "SELECTED DYLIB"
-          echo "================================"
-          echo "$DYLIB"
-
-          echo "================================"
-          echo "FILE"
-          echo "================================"
-          file "$DYLIB"
-
-          echo "================================"
-          echo "LIPO"
-          echo "================================"
-          lipo -info "$DYLIB"
-
-          echo "================================"
-          echo "MACH-O HEADER"
-          echo "================================"
-          otool -hv "$DYLIB"
-
-          echo "================================"
-          echo "CHECKING FOR DSYM"
-          echo "================================"
-
-          if file "$DYLIB" | grep -qi "dSYM"; then
-            echo "ERROR: SELECTED FILE IS A DSYM"
-            exit 1
-          fi
-
-          echo "DSYM CHECK PASSED"
-
-          echo "================================"
-          echo "CHECKING MACH-O FILETYPE"
-          echo "================================"
-
-          HEADER=$(otool -hv "$DYLIB" | tail -n +2)
-
-          echo "$HEADER"
-
-          if echo "$HEADER" | grep -q "MH_DSYM"; then
-            echo "ERROR: MH_DSYM DETECTED"
-            exit 1
-          fi
-
-          echo "MACH-O FILETYPE CHECK PASSED"
-
-          echo "================================"
-          echo "COPYING FINAL DYLIB"
-          echo "================================"
-
-          mkdir -p output
-
-          cp "$DYLIB" output/VoiceBridgeProbe.dylib
-
-          echo "================================"
-          echo "FINAL OUTPUT"
-          echo "================================"
-
-          ls -lh output/VoiceBridgeProbe.dylib
-          file output/VoiceBridgeProbe.dylib
-          lipo -info output/VoiceBridgeProbe.dylib
-          otool -hv output/VoiceBridgeProbe.dylib
-
-      - name: Final validation
+      - name: Verify dylib
+        shell: bash
         run: |
           set -e
 
-          FILE="output/VoiceBridgeProbe.dylib"
+          echo "===== file ====="
+          file build/VoiceBridgeProbe.dylib
 
-          echo "================================"
-          echo "FINAL VALIDATION"
-          echo "================================"
+          echo "===== architecture ====="
+          lipo -info build/VoiceBridgeProbe.dylib
 
-          test -f "$FILE"
+          echo "===== load commands ====="
+          otool -l build/VoiceBridgeProbe.dylib | grep -A5 -E "LC_BUILD_VERSION|LC_VERSION_MIN_IPHONEOS" || true
 
-          echo "FILE:"
-          file "$FILE"
+          echo "===== exported symbols ====="
+          nm -gU build/VoiceBridgeProbe.dylib | head -50 || true
 
-          echo "ARCH:"
-          lipo -info "$FILE"
+          echo "===== strings ====="
+          strings build/VoiceBridgeProbe.dylib |
+            grep -Ei "VoiceBridgeProbe|voice|tts|speech|audio|synthesis|send|message" |
+            head -100 || true
 
-          echo "HEADER:"
-          otool -hv "$FILE"
+      - name: Strip debug symbols from dylib
+        shell: bash
+        run: |
+          set -e
 
-          if file "$FILE" | grep -qi "dSYM"; then
-            echo "ERROR: FINAL FILE IS DSYM"
-            exit 1
-          fi
+          strip \
+            -S \
+            build/VoiceBridgeProbe.dylib
 
-          if otool -hv "$FILE" | grep -q "MH_DSYM"; then
-            echo "ERROR: FINAL FILE IS MH_DSYM"
-            exit 1
-          fi
+          file build/VoiceBridgeProbe.dylib
+          lipo -info build/VoiceBridgeProbe.dylib
 
-          echo "================================"
-          echo "SUCCESS"
-          echo "================================"
+      - name: Package
+        shell: bash
+        run: |
+          set -e
 
-      - name: Upload VoiceBridgeProbe.dylib
+          cd build
+
+          zip -9 \
+            VoiceRebuildInjectTest-dylib.zip \
+            VoiceBridgeProbe.dylib
+
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: VoiceBridgeProbe-dylib
-          path: output/VoiceBridgeProbe.dylib
+          name: VoiceRebuildInjectTest-dylib
+          path: build/VoiceRebuildInjectTest-dylib.zip
           if-no-files-found: error
