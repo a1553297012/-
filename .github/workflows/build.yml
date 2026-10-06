@@ -25,65 +25,143 @@ jobs:
         run: |
           export THEOS="$HOME/theos"
 
+          echo "=== THEOS ==="
+          echo "$THEOS"
+
+          echo "=== MAKEFILE ==="
+          cat Makefile
+
+          echo "=== BUILD ==="
           make clean || true
           make
 
-      - name: Locate real dylib
+      - name: Find and verify dylib
         run: |
           set -e
 
-          echo "=== All dylib files ==="
+          echo "================================"
+          echo "SEARCHING ALL DYLIB FILES"
+          echo "================================"
+
           find .theos -type f -name "*.dylib" -print
 
-          echo "=== Searching VoiceBridgeProbe.dylib ==="
+          echo "================================"
+          echo "SEARCHING REAL VOICEBRIDGEPROBE"
+          echo "================================"
 
-          DYLIB="$(find .theos -type f \
+          DYLIBS=$(find .theos -type f \
             -name "VoiceBridgeProbe.dylib" \
-            -not -path "*.dSYM/*" \
-            | head -n 1)"
+            -not -path "*/.dSYM/*" \
+            -not -path "*/dSYM/*")
 
-          if [ -z "$DYLIB" ]; then
-            echo "ERROR: VoiceBridgeProbe.dylib not found"
+          echo "$DYLIBS"
+
+          COUNT=$(echo "$DYLIBS" | grep -c "VoiceBridgeProbe.dylib" || true)
+
+          if [ "$COUNT" -eq 0 ]; then
+            echo "ERROR: No VoiceBridgeProbe.dylib found"
             exit 1
           fi
 
-          echo "Found:"
+          DYLIB=$(echo "$DYLIBS" | head -n 1)
+
+          echo "================================"
+          echo "SELECTED DYLIB"
+          echo "================================"
           echo "$DYLIB"
 
-          echo "=== Mach-O identification ==="
+          echo "================================"
+          echo "FILE"
+          echo "================================"
           file "$DYLIB"
 
-          echo "=== Architecture ==="
+          echo "================================"
+          echo "LIPO"
+          echo "================================"
           lipo -info "$DYLIB"
 
-          echo "=== Mach-O header ==="
+          echo "================================"
+          echo "MACH-O HEADER"
+          echo "================================"
           otool -hv "$DYLIB"
 
+          echo "================================"
+          echo "CHECKING FOR DSYM"
+          echo "================================"
+
+          if file "$DYLIB" | grep -qi "dSYM"; then
+            echo "ERROR: SELECTED FILE IS A DSYM"
+            exit 1
+          fi
+
+          echo "DSYM CHECK PASSED"
+
+          echo "================================"
+          echo "CHECKING MACH-O FILETYPE"
+          echo "================================"
+
+          HEADER=$(otool -hv "$DYLIB" | tail -n +2)
+
+          echo "$HEADER"
+
+          if echo "$HEADER" | grep -q "MH_DSYM"; then
+            echo "ERROR: MH_DSYM DETECTED"
+            exit 1
+          fi
+
+          echo "MACH-O FILETYPE CHECK PASSED"
+
+          echo "================================"
+          echo "COPYING FINAL DYLIB"
+          echo "================================"
+
           mkdir -p output
+
           cp "$DYLIB" output/VoiceBridgeProbe.dylib
 
-      - name: Verify output
+          echo "================================"
+          echo "FINAL OUTPUT"
+          echo "================================"
+
+          ls -lh output/VoiceBridgeProbe.dylib
+          file output/VoiceBridgeProbe.dylib
+          lipo -info output/VoiceBridgeProbe.dylib
+          otool -hv output/VoiceBridgeProbe.dylib
+
+      - name: Final validation
         run: |
           set -e
 
-          test -f output/VoiceBridgeProbe.dylib
+          FILE="output/VoiceBridgeProbe.dylib"
 
-          echo "=== FINAL FILE ==="
-          ls -lh output/VoiceBridgeProbe.dylib
+          echo "================================"
+          echo "FINAL VALIDATION"
+          echo "================================"
 
-          echo "=== FILE TYPE ==="
-          file output/VoiceBridgeProbe.dylib
+          test -f "$FILE"
 
-          echo "=== ARCHITECTURE ==="
-          lipo -info output/VoiceBridgeProbe.dylib
+          echo "FILE:"
+          file "$FILE"
 
-          echo "=== CHECK dSYM ==="
-          if file output/VoiceBridgeProbe.dylib | grep -qi "dSYM"; then
-            echo "ERROR: dSYM was selected!"
+          echo "ARCH:"
+          lipo -info "$FILE"
+
+          echo "HEADER:"
+          otool -hv "$FILE"
+
+          if file "$FILE" | grep -qi "dSYM"; then
+            echo "ERROR: FINAL FILE IS DSYM"
             exit 1
           fi
 
-          echo "=== DYLIB CHECK PASSED ==="
+          if otool -hv "$FILE" | grep -q "MH_DSYM"; then
+            echo "ERROR: FINAL FILE IS MH_DSYM"
+            exit 1
+          fi
+
+          echo "================================"
+          echo "SUCCESS"
+          echo "================================"
 
       - name: Upload VoiceBridgeProbe.dylib
         uses: actions/upload-artifact@v4
