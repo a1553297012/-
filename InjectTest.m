@@ -2,39 +2,72 @@
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 
-static NSString *ProbeLogPath(void) {
-    NSString *tmp = NSTemporaryDirectory();
-    return [tmp stringByAppendingPathComponent:@"VoiceBridgeProbe.log"];
+static NSString *ProbeDirectory(void) {
+    return @"/tmp/VoiceBridgeProbe";
 }
 
-static void WriteLog(NSString *text) {
-    NSString *line = [NSString stringWithFormat:@"%@\n", text];
+static NSString *ProbeFile(NSString *name) {
+    return [[ProbeDirectory() stringByAppendingString:@"/"] stringByAppendingString:name];
+}
 
-    NSLog(@"[VoiceBridgeProbe] %@", text);
+static void EnsureDirectory(void) {
+    [[NSFileManager defaultManager]
+        createDirectoryAtPath:ProbeDirectory()
+        withIntermediateDirectories:YES
+        attributes:nil
+        error:nil];
+}
 
-    NSData *data = [line dataUsingEncoding:NSUTF8StringEncoding];
+static void WriteFile(NSString *name, NSString *text) {
+    EnsureDirectory();
+
+    NSString *path = ProbeFile(name);
+
+    [text writeToFile:path
+          atomically:YES
+            encoding:NSUTF8StringEncoding
+               error:nil];
+}
+
+static void AppendFile(NSString *name, NSString *text) {
+    EnsureDirectory();
+
+    NSString *path = ProbeFile(name);
+
+    NSData *newData =
+        [text dataUsingEncoding:NSUTF8StringEncoding];
+
     NSFileHandle *handle =
-        [NSFileHandle fileHandleForWritingAtPath:ProbeLogPath()];
+        [NSFileHandle fileHandleForWritingAtPath:path];
 
-    if (handle) {
-        @try {
-            [handle seekToEndOfFile];
-            [handle writeData:data];
-            [handle closeFile];
-        } @catch (__unused NSException *e) {
-        }
-    } else {
-        [data writeToFile:ProbeLogPath() atomically:YES];
+    if (!handle) {
+        [newData writeToFile:path atomically:YES];
+        return;
+    }
+
+    @try {
+        [handle seekToEndOfFile];
+        [handle writeData:newData];
+        [handle closeFile];
+    } @catch (__unused NSException *exception) {
+        [handle closeFile];
     }
 }
 
-static BOOL NameLooksRelevant(const char *name) {
-    if (!name) return NO;
+static BOOL IsInterestingName(const char *name) {
+    if (!name) {
+        return NO;
+    }
 
     NSString *s =
         [[NSString alloc] initWithUTF8String:name];
 
-    if (!s) return NO;
+    if (!s) {
+        return NO;
+    }
+
+    NSString *lower =
+        [s lowercaseString];
 
     NSArray *keywords = @[
         @"voice",
@@ -42,18 +75,13 @@ static BOOL NameLooksRelevant(const char *name) {
         @"speech",
         @"audio",
         @"speak",
+        @"synth",
         @"synthesis",
-        @"synthesize",
-        @"voicemessage",
-        @"voicerecord",
-        @"voicemsg",
         @"message",
         @"send",
-        @"play",
+        @"record",
         @"player"
     ];
-
-    NSString *lower = [s lowercaseString];
 
     for (NSString *keyword in keywords) {
         if ([lower containsString:keyword]) {
@@ -64,130 +92,164 @@ static BOOL NameLooksRelevant(const char *name) {
     return NO;
 }
 
-static void DumpMethods(Class cls) {
-    if (!cls) return;
-
-    const char *className = class_getName(cls);
-    if (!className) return;
-
-    if (!NameLooksRelevant(className)) {
-        return;
-    }
-
-    WriteLog(
-        [NSString stringWithFormat:
-            @"\n========== CLASS: %s ==========",
-            className]
+static void ScanRuntime(void) {
+    AppendFile(
+        @"runtime.log",
+        @"\n========== VoiceBridgeProbe Runtime Scan ==========\n"
     );
 
-    unsigned int count = 0;
-    Method *methods = class_copyMethodList(cls, &count);
+    int count = objc_getClassList(NULL, 0);
 
-    for (unsigned int i = 0; i < count; i++) {
-        Method method = methods[i];
-
-        SEL selector = method_getName(method);
-        if (!selector) continue;
-
-        const char *selName = sel_getName(selector);
-        if (!selName) continue;
-
-        NSString *methodString =
-            [[NSString alloc] initWithUTF8String:selName];
-
-        if (!methodString) continue;
-
-        NSString *lower =
-            [methodString lowercaseString];
-
-        BOOL relevant = NO;
-
-        NSArray *keywords = @[
-            @"voice",
-            @"tts",
-            @"speech",
-            @"audio",
-            @"speak",
-            @"synth",
-            @"send",
-            @"message",
-            @"play",
-            @"record"
-        ];
-
-        for (NSString *keyword in keywords) {
-            if ([lower containsString:keyword]) {
-                relevant = YES;
-                break;
-            }
-        }
-
-        if (relevant) {
-            const char *types = method_getTypeEncoding(method);
-
-            WriteLog(
-                [NSString stringWithFormat:
-                    @"  -[%s %s] types=%s",
-                    className,
-                    selName,
-                    types ? types : "?"]
-            );
-        }
-    }
-
-    free(methods);
-}
-
-static void DumpRelevantClasses(void) {
-    WriteLog(@"========================================");
-    WriteLog(@"VoiceBridgeProbe START");
-    WriteLog(@"========================================");
-
-    int classCount = objc_getClassList(NULL, 0);
-
-    if (classCount <= 0) {
-        WriteLog(@"objc_getClassList returned no classes");
+    if (count <= 0) {
+        AppendFile(
+            @"runtime.log",
+            @"objc_getClassList returned 0\n"
+        );
         return;
     }
 
     Class *classes =
         (__unsafe_unretained Class *)
-        malloc(sizeof(Class) * classCount);
+        malloc(sizeof(Class) * count);
 
     if (!classes) {
-        WriteLog(@"Unable to allocate class list");
+        AppendFile(
+            @"runtime.log",
+            @"class allocation failed\n"
+        );
         return;
     }
 
-    classCount = objc_getClassList(classes, classCount);
+    count = objc_getClassList(classes, count);
 
-    WriteLog(
+    AppendFile(
+        @"runtime.log",
         [NSString stringWithFormat:
-            @"Loaded Objective-C classes: %d",
-            classCount]
+            @"Loaded Objective-C classes: %d\n",
+            count]
     );
 
-    for (int i = 0; i < classCount; i++) {
-        DumpMethods(classes[i]);
+    int interestingClasses = 0;
+    int interestingMethods = 0;
+
+    for (int i = 0; i < count; i++) {
+
+        Class cls = classes[i];
+
+        const char *className =
+            class_getName(cls);
+
+        if (!IsInterestingName(className)) {
+            continue;
+        }
+
+        interestingClasses++;
+
+        AppendFile(
+            @"runtime.log",
+            [NSString stringWithFormat:
+                @"\nCLASS: %s\n",
+                className]
+        );
+
+        unsigned int methodCount = 0;
+
+        Method *methods =
+            class_copyMethodList(cls, &methodCount);
+
+        for (unsigned int j = 0;
+             j < methodCount;
+             j++) {
+
+            SEL selector =
+                method_getName(methods[j]);
+
+            if (!selector) {
+                continue;
+            }
+
+            const char *selectorName =
+                sel_getName(selector);
+
+            if (!IsInterestingName(selectorName)) {
+                continue;
+            }
+
+            interestingMethods++;
+
+            const char *types =
+                method_getTypeEncoding(methods[j]);
+
+            AppendFile(
+                @"runtime.log",
+                [NSString stringWithFormat:
+                    @"  -[%s %s] types=%s\n",
+                    className,
+                    selectorName,
+                    types ? types : "?"]
+            );
+        }
+
+        free(methods);
     }
 
     free(classes);
 
-    WriteLog(@"========================================");
-    WriteLog(@"VoiceBridgeProbe END");
-    WriteLog(@"========================================");
+    AppendFile(
+        @"runtime.log",
+        [NSString stringWithFormat:
+            @"\nInteresting classes: %d\n"
+             "Interesting methods: %d\n"
+             "========== Scan Finished ==========\n",
+            interestingClasses,
+            interestingMethods]
+    );
+
+    WriteFile(
+        @"scan.finished",
+        @"VoiceBridgeProbe runtime scan finished\n"
+    );
 }
 
 __attribute__((constructor))
 static void VoiceBridgeProbeLoaded(void) {
-    @autoreleasepool {
-        WriteLog(@"VoiceBridgeProbe dylib loaded");
 
+    @autoreleasepool {
+
+        /*
+         * 最先执行的动作：
+         * 如果这个文件存在，就证明 dylib 的
+         * constructor 已经真正执行。
+         */
+        WriteFile(
+            @"loaded",
+            @"VoiceBridgeProbe constructor executed\n"
+        );
+
+        WriteFile(
+            @"info",
+            [NSString stringWithFormat:
+                @"Process: %@\n"
+                 "PID: %d\n"
+                 "Timestamp: %@\n",
+                [[NSProcessInfo processInfo] processName],
+                [[NSProcessInfo processInfo] processIdentifier],
+                [NSDate date]]
+        );
+
+        AppendFile(
+            @"runtime.log",
+            @"VoiceBridgeProbe constructor executed\n"
+        );
+
+        /*
+         * 等主线程起来之后再扫描 Runtime。
+         */
         dispatch_async(
             dispatch_get_main_queue(),
             ^{
                 @autoreleasepool {
-                    DumpRelevantClasses();
+                    ScanRuntime();
                 }
             }
         );
