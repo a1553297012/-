@@ -5,96 +5,182 @@
 static void VBLog(NSString *format, ...) {
     va_list args;
     va_start(args, format);
-    NSString *s = [[NSString alloc] initWithFormat:format arguments:args];
+
+    NSString *message =
+        [[NSString alloc] initWithFormat:format arguments:args];
+
     va_end(args);
-    NSLog(@"[VoiceBridgeProbe] %@", s);
+
+    NSLog(@"[VoiceBridgeProbe] %@", message);
 }
 
 static void DumpMethods(Class cls) {
+    if (!cls) {
+        return;
+    }
+
     unsigned int count = 0;
     Method *methods = class_copyMethodList(cls, &count);
 
     VBLog(@"%@ methods=%u", NSStringFromClass(cls), count);
 
     for (unsigned int i = 0; i < count; i++) {
-        SEL sel = method_getName(methods[i]);
-        const char *enc = method_getTypeEncoding(methods[i]);
+        SEL selector = method_getName(methods[i]);
 
-        NSString *name = NSStringFromSelector(sel);
+        const char *encoding =
+            method_getTypeEncoding(methods[i]);
+
+        NSString *name =
+            NSStringFromSelector(selector);
 
         if ([name containsString:@"Voice"] ||
             [name containsString:@"Audio"] ||
             [name containsString:@"Chat"] ||
             [name containsString:@"Account"] ||
-            [name containsString:@"sendConverted"]) {
+            [name containsString:@"Send"] ||
+            [name containsString:@"send"]) {
 
-            VBLog(@"  %@ :: %s", name, enc ?: "");
+            VBLog(@"  %@ :: %s",
+                  name,
+                  encoding ? encoding : "");
         }
     }
 
     free(methods);
 }
 
+static UIWindow *VBFindKeyWindow(void) {
+
+    UIWindow *keyWindow = nil;
+
+    /*
+     * iOS 12 兼容方式。
+     * 不使用 UIWindowScene / connectedScenes。
+     */
+
+    if ([UIApplication sharedApplication].keyWindow) {
+        keyWindow =
+            [UIApplication sharedApplication].keyWindow;
+    }
+
+    if (!keyWindow) {
+
+        NSArray *windows =
+            [UIApplication sharedApplication].windows;
+
+        for (UIWindow *window in windows) {
+
+            if (window.isKeyWindow) {
+                keyWindow = window;
+                break;
+            }
+        }
+    }
+
+    return keyWindow;
+}
+
+static UIViewController *VBTopViewController(
+    UIViewController *root) {
+
+    if (!root) {
+        return nil;
+    }
+
+    UIViewController *current = root;
+
+    while (current.presentedViewController) {
+        current = current.presentedViewController;
+    }
+
+    return current;
+}
+
 static void Probe(void) {
+
     @autoreleasepool {
 
-        Class bridge = NSClassFromString(@"SHVoiceIndependentSendBridge");
-        Class recon  = NSClassFromString(@"SHVoiceReconstructionManager");
-        Class wrap   = NSClassFromString(@"SHVISWrap");
+        VBLog(@"================================");
+        VBLog(@"VoiceBridgeProbe START");
+        VBLog(@"================================");
 
-        VBLog(@"=== VoiceBridgeProbe start ===");
+        Class bridge =
+            NSClassFromString(
+                @"SHVoiceIndependentSendBridge"
+            );
 
-        VBLog(@"SHVoiceIndependentSendBridge = %@",
+        Class reconstruction =
+            NSClassFromString(
+                @"SHVoiceReconstructionManager"
+            );
+
+        Class wrap =
+            NSClassFromString(@"SHVISWrap");
+
+        VBLog(@"SHVoiceIndependentSendBridge: %@",
               bridge ? @"FOUND" : @"NOT FOUND");
 
-        VBLog(@"SHVoiceReconstructionManager = %@",
-              recon ? @"FOUND" : @"NOT FOUND");
+        VBLog(@"SHVoiceReconstructionManager: %@",
+              reconstruction ? @"FOUND" : @"NOT FOUND");
 
-        VBLog(@"SHVISWrap = %@",
+        VBLog(@"SHVISWrap: %@",
               wrap ? @"FOUND" : @"NOT FOUND");
 
-        if (bridge) DumpMethods(bridge);
-        if (recon)  DumpMethods(recon);
-        if (wrap)   DumpMethods(wrap);
+        if (bridge) {
+            DumpMethods(bridge);
+        }
 
-        dispatch_async(dispatch_get_main_queue(), ^{
+        if (reconstruction) {
+            DumpMethods(reconstruction);
+        }
 
-            UIWindow *keyWindow = nil;
+        if (wrap) {
+            DumpMethods(wrap);
+        }
 
-            for (UIWindowScene *scene in
-                 UIApplication.sharedApplication.connectedScenes) {
+        dispatch_async(
+            dispatch_get_main_queue(),
+            ^{
 
-                if (scene.activationState ==
-                    UISceneActivationStateForegroundActive) {
+                UIWindow *window =
+                    VBFindKeyWindow();
 
-                    for (UIWindow *window in scene.windows) {
-                        if (window.isKeyWindow) {
-                            keyWindow = window;
-                            break;
-                        }
-                    }
+                if (!window) {
+                    VBLog(@"keyWindow: NOT FOUND");
+                    return;
                 }
 
-                if (keyWindow) break;
+                UIViewController *top =
+                    VBTopViewController(
+                        window.rootViewController
+                    );
+
+                VBLog(@"keyWindow: FOUND");
+
+                VBLog(@"topViewController: %@",
+                      top
+                      ? NSStringFromClass(top.class)
+                      : @"NOT FOUND");
+
+                VBLog(@"SAFE PROBE ONLY");
+                VBLog(@"No message will be sent.");
+                VBLog(@"No voice will be sent.");
+
+                VBLog(@"================================");
+                VBLog(@"VoiceBridgeProbe END");
+                VBLog(@"================================");
             }
-
-            UIViewController *vc = keyWindow.rootViewController;
-
-            while (vc.presentedViewController) {
-                vc = vc.presentedViewController;
-            }
-
-            VBLog(@"topViewController=%@",
-                  NSStringFromClass(vc.class));
-
-            VBLog(@"SAFE PROBE ONLY: no voice/message will be sent.");
-        });
+        );
     }
 }
 
 __attribute__((constructor))
 static void VoiceBridgeProbeLoaded(void) {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        Probe();
-    });
+
+    dispatch_async(
+        dispatch_get_main_queue(),
+        ^{
+            Probe();
+        }
+    );
 }
