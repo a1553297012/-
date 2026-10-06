@@ -2,185 +2,194 @@
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 
-static void VBLog(NSString *format, ...) {
-    va_list args;
-    va_start(args, format);
+static NSString *ProbeLogPath(void) {
+    NSString *tmp = NSTemporaryDirectory();
+    return [tmp stringByAppendingPathComponent:@"VoiceBridgeProbe.log"];
+}
 
-    NSString *message =
-        [[NSString alloc] initWithFormat:format arguments:args];
+static void WriteLog(NSString *text) {
+    NSString *line = [NSString stringWithFormat:@"%@\n", text];
 
-    va_end(args);
+    NSLog(@"[VoiceBridgeProbe] %@", text);
 
-    NSLog(@"[VoiceBridgeProbe] %@", message);
+    NSData *data = [line dataUsingEncoding:NSUTF8StringEncoding];
+    NSFileHandle *handle =
+        [NSFileHandle fileHandleForWritingAtPath:ProbeLogPath()];
+
+    if (handle) {
+        @try {
+            [handle seekToEndOfFile];
+            [handle writeData:data];
+            [handle closeFile];
+        } @catch (__unused NSException *e) {
+        }
+    } else {
+        [data writeToFile:ProbeLogPath() atomically:YES];
+    }
+}
+
+static BOOL NameLooksRelevant(const char *name) {
+    if (!name) return NO;
+
+    NSString *s =
+        [[NSString alloc] initWithUTF8String:name];
+
+    if (!s) return NO;
+
+    NSArray *keywords = @[
+        @"voice",
+        @"tts",
+        @"speech",
+        @"audio",
+        @"speak",
+        @"synthesis",
+        @"synthesize",
+        @"voicemessage",
+        @"voicerecord",
+        @"voicemsg",
+        @"message",
+        @"send",
+        @"play",
+        @"player"
+    ];
+
+    NSString *lower = [s lowercaseString];
+
+    for (NSString *keyword in keywords) {
+        if ([lower containsString:keyword]) {
+            return YES;
+        }
+    }
+
+    return NO;
 }
 
 static void DumpMethods(Class cls) {
-    if (!cls) {
+    if (!cls) return;
+
+    const char *className = class_getName(cls);
+    if (!className) return;
+
+    if (!NameLooksRelevant(className)) {
         return;
     }
+
+    WriteLog(
+        [NSString stringWithFormat:
+            @"\n========== CLASS: %s ==========",
+            className]
+    );
 
     unsigned int count = 0;
     Method *methods = class_copyMethodList(cls, &count);
 
-    VBLog(@"%@ methods=%u", NSStringFromClass(cls), count);
-
     for (unsigned int i = 0; i < count; i++) {
-        SEL selector = method_getName(methods[i]);
+        Method method = methods[i];
 
-        const char *encoding =
-            method_getTypeEncoding(methods[i]);
+        SEL selector = method_getName(method);
+        if (!selector) continue;
 
-        NSString *name =
-            NSStringFromSelector(selector);
+        const char *selName = sel_getName(selector);
+        if (!selName) continue;
 
-        if ([name containsString:@"Voice"] ||
-            [name containsString:@"Audio"] ||
-            [name containsString:@"Chat"] ||
-            [name containsString:@"Account"] ||
-            [name containsString:@"Send"] ||
-            [name containsString:@"send"]) {
+        NSString *methodString =
+            [[NSString alloc] initWithUTF8String:selName];
 
-            VBLog(@"  %@ :: %s",
-                  name,
-                  encoding ? encoding : "");
+        if (!methodString) continue;
+
+        NSString *lower =
+            [methodString lowercaseString];
+
+        BOOL relevant = NO;
+
+        NSArray *keywords = @[
+            @"voice",
+            @"tts",
+            @"speech",
+            @"audio",
+            @"speak",
+            @"synth",
+            @"send",
+            @"message",
+            @"play",
+            @"record"
+        ];
+
+        for (NSString *keyword in keywords) {
+            if ([lower containsString:keyword]) {
+                relevant = YES;
+                break;
+            }
+        }
+
+        if (relevant) {
+            const char *types = method_getTypeEncoding(method);
+
+            WriteLog(
+                [NSString stringWithFormat:
+                    @"  -[%s %s] types=%s",
+                    className,
+                    selName,
+                    types ? types : "?"]
+            );
         }
     }
 
     free(methods);
 }
 
-static UIWindow *VBFindKeyWindow(void) {
+static void DumpRelevantClasses(void) {
+    WriteLog(@"========================================");
+    WriteLog(@"VoiceBridgeProbe START");
+    WriteLog(@"========================================");
 
-    UIWindow *keyWindow = nil;
+    int classCount = objc_getClassList(NULL, 0);
 
-    /*
-     * iOS 12 兼容方式。
-     * 不使用 UIWindowScene / connectedScenes。
-     */
-
-    if ([UIApplication sharedApplication].keyWindow) {
-        keyWindow =
-            [UIApplication sharedApplication].keyWindow;
+    if (classCount <= 0) {
+        WriteLog(@"objc_getClassList returned no classes");
+        return;
     }
 
-    if (!keyWindow) {
+    Class *classes =
+        (__unsafe_unretained Class *)
+        malloc(sizeof(Class) * classCount);
 
-        NSArray *windows =
-            [UIApplication sharedApplication].windows;
-
-        for (UIWindow *window in windows) {
-
-            if (window.isKeyWindow) {
-                keyWindow = window;
-                break;
-            }
-        }
+    if (!classes) {
+        WriteLog(@"Unable to allocate class list");
+        return;
     }
 
-    return keyWindow;
-}
+    classCount = objc_getClassList(classes, classCount);
 
-static UIViewController *VBTopViewController(
-    UIViewController *root) {
+    WriteLog(
+        [NSString stringWithFormat:
+            @"Loaded Objective-C classes: %d",
+            classCount]
+    );
 
-    if (!root) {
-        return nil;
+    for (int i = 0; i < classCount; i++) {
+        DumpMethods(classes[i]);
     }
 
-    UIViewController *current = root;
+    free(classes);
 
-    while (current.presentedViewController) {
-        current = current.presentedViewController;
-    }
-
-    return current;
-}
-
-static void Probe(void) {
-
-    @autoreleasepool {
-
-        VBLog(@"================================");
-        VBLog(@"VoiceBridgeProbe START");
-        VBLog(@"================================");
-
-        Class bridge =
-            NSClassFromString(
-                @"SHVoiceIndependentSendBridge"
-            );
-
-        Class reconstruction =
-            NSClassFromString(
-                @"SHVoiceReconstructionManager"
-            );
-
-        Class wrap =
-            NSClassFromString(@"SHVISWrap");
-
-        VBLog(@"SHVoiceIndependentSendBridge: %@",
-              bridge ? @"FOUND" : @"NOT FOUND");
-
-        VBLog(@"SHVoiceReconstructionManager: %@",
-              reconstruction ? @"FOUND" : @"NOT FOUND");
-
-        VBLog(@"SHVISWrap: %@",
-              wrap ? @"FOUND" : @"NOT FOUND");
-
-        if (bridge) {
-            DumpMethods(bridge);
-        }
-
-        if (reconstruction) {
-            DumpMethods(reconstruction);
-        }
-
-        if (wrap) {
-            DumpMethods(wrap);
-        }
-
-        dispatch_async(
-            dispatch_get_main_queue(),
-            ^{
-
-                UIWindow *window =
-                    VBFindKeyWindow();
-
-                if (!window) {
-                    VBLog(@"keyWindow: NOT FOUND");
-                    return;
-                }
-
-                UIViewController *top =
-                    VBTopViewController(
-                        window.rootViewController
-                    );
-
-                VBLog(@"keyWindow: FOUND");
-
-                VBLog(@"topViewController: %@",
-                      top
-                      ? NSStringFromClass(top.class)
-                      : @"NOT FOUND");
-
-                VBLog(@"SAFE PROBE ONLY");
-                VBLog(@"No message will be sent.");
-                VBLog(@"No voice will be sent.");
-
-                VBLog(@"================================");
-                VBLog(@"VoiceBridgeProbe END");
-                VBLog(@"================================");
-            }
-        );
-    }
+    WriteLog(@"========================================");
+    WriteLog(@"VoiceBridgeProbe END");
+    WriteLog(@"========================================");
 }
 
 __attribute__((constructor))
 static void VoiceBridgeProbeLoaded(void) {
+    @autoreleasepool {
+        WriteLog(@"VoiceBridgeProbe dylib loaded");
 
-    dispatch_async(
-        dispatch_get_main_queue(),
-        ^{
-            Probe();
-        }
-    );
+        dispatch_async(
+            dispatch_get_main_queue(),
+            ^{
+                @autoreleasepool {
+                    DumpRelevantClasses();
+                }
+            }
+        );
+    }
 }
