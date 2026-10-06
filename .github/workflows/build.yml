@@ -13,6 +13,7 @@ jobs:
 
       - name: Install dependencies
         run: |
+          brew update
           brew install make ldid-procursus
 
       - name: Install Theos
@@ -20,21 +21,73 @@ jobs:
           rm -rf "$HOME/theos"
           git clone --recursive https://github.com/theos/theos.git "$HOME/theos"
 
-      - name: Build package
+      - name: Build dylib
         run: |
           export THEOS="$HOME/theos"
-          export THEOS_PACKAGE_SCHEME=rootless
-          make clean
-          make package FINALPACKAGE=1
 
-      - name: Find package
+          make clean || true
+          make
+
+      - name: Locate real dylib
         run: |
-          mkdir -p output
-          find packages -name "*.deb" -exec cp {} output/ \;
-          find output -type f -maxdepth 1 -print
+          set -e
 
-      - name: Upload package
+          echo "=== All dylib files ==="
+          find .theos -type f -name "*.dylib" -print
+
+          echo "=== Searching VoiceBridgeProbe.dylib ==="
+
+          DYLIB="$(find .theos -type f \
+            -name "VoiceBridgeProbe.dylib" \
+            -not -path "*.dSYM/*" \
+            | head -n 1)"
+
+          if [ -z "$DYLIB" ]; then
+            echo "ERROR: VoiceBridgeProbe.dylib not found"
+            exit 1
+          fi
+
+          echo "Found:"
+          echo "$DYLIB"
+
+          echo "=== Mach-O identification ==="
+          file "$DYLIB"
+
+          echo "=== Architecture ==="
+          lipo -info "$DYLIB"
+
+          echo "=== Mach-O header ==="
+          otool -hv "$DYLIB"
+
+          mkdir -p output
+          cp "$DYLIB" output/VoiceBridgeProbe.dylib
+
+      - name: Verify output
+        run: |
+          set -e
+
+          test -f output/VoiceBridgeProbe.dylib
+
+          echo "=== FINAL FILE ==="
+          ls -lh output/VoiceBridgeProbe.dylib
+
+          echo "=== FILE TYPE ==="
+          file output/VoiceBridgeProbe.dylib
+
+          echo "=== ARCHITECTURE ==="
+          lipo -info output/VoiceBridgeProbe.dylib
+
+          echo "=== CHECK dSYM ==="
+          if file output/VoiceBridgeProbe.dylib | grep -qi "dSYM"; then
+            echo "ERROR: dSYM was selected!"
+            exit 1
+          fi
+
+          echo "=== DYLIB CHECK PASSED ==="
+
+      - name: Upload VoiceBridgeProbe.dylib
         uses: actions/upload-artifact@v4
         with:
-          name: VoiceBridgeProbe-deb
-          path: output/*.deb
+          name: VoiceBridgeProbe-dylib
+          path: output/VoiceBridgeProbe.dylib
+          if-no-files-found: error
