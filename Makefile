@@ -3,12 +3,10 @@ TARGET = iphone:clang:latest:12.0
 
 include $(THEOS)/makefiles/common.mk
 
-TWEAK_NAME = VoiceRebuildInjectTest
+TWEAK_NAME = VoiceBridgeProbe
 
-VoiceRebuildInjectTest_FILES = InjectTest.m
-VoiceRebuildInjectTest_CFLAGS = -fobjc-arc
-VoiceRebuildInjectTest_FRAMEWORKS = Foundation UIKit AVFoundation Security
-
-INSTALL_TARGET_PROCESSES = WeChat
+VoiceBridgeProbe_FILES = InjectTest.m
+VoiceBridgeProbe_CFLAGS = -fobjc-arc
+VoiceBridgeProbe_FRAMEWORKS = Foundation UIKit
 
 include $(THEOS_MAKE_PATH)/tweak.mk
