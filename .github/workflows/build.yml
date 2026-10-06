@@ -1,4 +1,4 @@
-name: Build dylib
+name: Build VoiceBridgeProbe
 
 on:
   workflow_dispatch:
@@ -20,20 +20,21 @@ jobs:
           rm -rf "$HOME/theos"
           git clone --recursive https://github.com/theos/theos.git "$HOME/theos"
 
-      - name: Build dylib
+      - name: Build package
         run: |
           export THEOS="$HOME/theos"
+          export THEOS_PACKAGE_SCHEME=rootless
           make clean
-          make
+          make package FINALPACKAGE=1
 
-      - name: Find dylib
+      - name: Find package
         run: |
           mkdir -p output
-          find .theos -name "*.dylib" -exec cp {} output/ \;
-          ls -la output
+          find packages -name "*.deb" -exec cp {} output/ \;
+          find output -type f -maxdepth 1 -print
 
-      - name: Upload dylib
+      - name: Upload package
         uses: actions/upload-artifact@v4
         with:
-          name: VoiceRebuildInjectTest-dylib
-          path: output/*.dylib
+          name: VoiceBridgeProbe-deb
+          path: output/*.deb
